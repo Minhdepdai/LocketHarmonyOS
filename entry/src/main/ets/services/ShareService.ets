@@ -30,11 +30,15 @@ export class ShareService {
     });
   }
 
-  public static async copyInviteLink(username: string): Promise<string> {
-    const url = ShareService.buildInviteUrl(username);
-    const pasteData: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, url);
+  public static async copyText(text: string): Promise<void> {
+    const pasteData: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
     const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
     await systemPasteboard.setData(pasteData);
+  }
+
+  public static async copyInviteLink(username: string): Promise<string> {
+    const url = ShareService.buildInviteUrl(username);
+    await ShareService.copyText(url);
     return url;
   }
 
@@ -44,6 +48,29 @@ export class ShareService {
     displayName: string
   ): Promise<void> {
     const sharedData = ShareService.buildSharedData(username, displayName);
+    const controller = new systemShare.ShareController(sharedData);
+    await controller.show(context, {
+      previewMode: systemShare.SharePreviewMode.DEFAULT,
+      selectionMode: systemShare.SelectionMode.SINGLE
+    });
+  }
+
+  public static async shareMomentViaSystemSheet(
+    context: common.UIAbilityContext,
+    thumbnailUrl: string,
+    senderName: string,
+    caption: string
+  ): Promise<void> {
+    const cleanName = senderName.trim();
+    const cleanCaption = caption.trim();
+    const title = cleanName.length > 0 ? `Khoảnh khắc từ ${cleanName}` : 'Khoảnh khắc Locket';
+    const description = cleanCaption.length > 0 ? cleanCaption : 'Xem khoảnh khắc trên Locket';
+    const sharedData = new systemShare.SharedData({
+      utd: utd.UniformDataType.HYPERLINK,
+      content: thumbnailUrl,
+      title: title,
+      description: description
+    });
     const controller = new systemShare.ShareController(sharedData);
     await controller.show(context, {
       previewMode: systemShare.SharePreviewMode.DEFAULT,

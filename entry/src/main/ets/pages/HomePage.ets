@@ -13,6 +13,7 @@ import { CacheService } from '../services/CacheService';
 import { LiveCameraController } from '../services/LiveCameraController';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { SessionManager } from '../services/SessionManager';
+import { ShareService } from '../services/ShareService';
 
 interface HomeRouteParams {
   filterUserUid?: string;
@@ -53,6 +54,7 @@ struct HomePage {
   @State burstOpacity: number = 0;
   @State burstScale: number = 0.6;
   @State showFriendFilter: boolean = false;
+  @State showEmojiPicker: boolean = false;
   @State slideDirection: string = 'right';
   @State pressedButtonId: string = '';
   @StorageProp('safe_top_vp') safeTopVp: number = 38;
@@ -64,6 +66,12 @@ struct HomePage {
   private xComponentController: XComponentController = new XComponentController();
   private liveCamera: LiveCameraController = new LiveCameraController();
   private cameraSurfaceId: string = '';
+  private readonly emojiList: string[] = [
+    '💛', '❤️', '🔥', '😍', '😂', '😭',
+    '🥹', '🥺', '👏', '🙌', '✨', '🎉',
+    '🥰', '😎', '🤔', '😱', '🫶', '💯',
+    '🥳', '😴', '🤍', '🩷', '🫡', '🤣'
+  ];
 
   private handleButtonTouch(id: string, event: TouchEvent): void {
     if (event.type === TouchType.Down) {
@@ -194,6 +202,9 @@ struct HomePage {
     }
     if (this.showFriendFilter) {
       this.showFriendFilter = false;
+    }
+    if (this.showEmojiPicker) {
+      this.showEmojiPicker = false;
     }
     if (this.viewMode === 'camera' && targetMode === 'feed') {
       this.slideDirection = 'up';
@@ -586,6 +597,24 @@ struct HomePage {
     }
   }
 
+  private async handleShareMoment(item: MomentItem | null): Promise<void> {
+    if (item === null || item.thumbnailUrl.length === 0) {
+      promptAction.showToast({ message: 'Không có khoảnh khắc để chia sẻ' });
+      return;
+    }
+    const context = getContext(this) as common.UIAbilityContext;
+    try {
+      await ShareService.shareMomentViaSystemSheet(context, item.thumbnailUrl, item.senderName, item.caption);
+    } catch (_err) {
+      try {
+        await ShareService.copyText(item.thumbnailUrl);
+        promptAction.showToast({ message: 'Đã sao chép liên kết khoảnh khắc' });
+      } catch (_copyErr) {
+        promptAction.showToast({ message: 'Không thể chia sẻ khoảnh khắc' });
+      }
+    }
+  }
+
   private formatShortRelativeTime(seconds: number): string {
     if (seconds <= 0) {
       return '';
@@ -655,32 +684,15 @@ struct HomePage {
   @Builder
   private buildTopBar() {
     Row() {
-      // Left: 48x48 circle megaphone icon
-      Column() {
-        Image($r('app.media.ic_megaphone'))
-          .width(24)
-          .height(24)
-          .fillColor('#FFFFFF')
-      }
-      .width(48)
-      .height(48)
-      .borderRadius(24)
-      .backgroundColor('#1A1A1C')
-      .border({ width: 1, color: '#2E2E30' })
-      .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-      .scale(this.pressedButtonId === 'home_megaphone' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-      .justifyContent(FlexAlign.Center)
-      .onTouch((e: TouchEvent) => {
-        this.handleButtonTouch('home_megaphone', e);
-      })
-      .onClick(() => {
-        this.loadInitialData();
-        promptAction.showToast({ message: 'Đã làm mới khoảnh khắc' });
-      })
+      // Left spacer balancing the 48x48 right profile avatar (megaphone button temporarily removed)
+      Column()
+        .width(48)
+        .height(48)
+        .hitTestBehavior(HitTestMode.None)
 
       Blank()
 
-      // Center: Mode-aware Friends / In-Place Filter pill
+      // Center: Mode-aware Friends / In-Place Filter floating pill
       Row({ space: 8 }) {
         if (this.viewMode === 'camera') {
           Image($r('app.media.ic_friends'))
@@ -707,9 +719,10 @@ struct HomePage {
       .height(48)
       .padding({ left: 20, right: 20 })
       .borderRadius(24)
-      .backgroundColor('#1A1A1C')
+      .backgroundColor('#CC1A1A1C')
+      .backdropBlur(16)
       .border({ width: 1, color: this.showFriendFilter ? '#FFB800' : '#2E2E30' })
-      .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+      .shadow({ radius: 16, color: '#66000000', offsetX: 0, offsetY: 4 })
       .scale(this.pressedButtonId === 'home_friends_pill' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
       .justifyContent(FlexAlign.Center)
       .onTouch((e: TouchEvent) => {
@@ -734,7 +747,8 @@ struct HomePage {
       this.buildProfileAvatarButton()
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+    .padding({ left: 16, right: 16, top: this.safeTopVp + 8, bottom: 8 })
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   @Builder
@@ -948,7 +962,7 @@ struct HomePage {
     }
     .width('100%')
     .layoutWeight(1)
-    .padding({ bottom: 72 })
+    .padding({ top: this.safeTopVp + 64, bottom: this.safeBottomVp + 72 })
     .alignItems(HorizontalAlign.Center)
     .transition(this.buildDirectionalTransition())
   }
@@ -1218,7 +1232,7 @@ struct HomePage {
               Image($r('app.media.ic_emoji_add'))
                 .width(22)
                 .height(22)
-                .fillColor('#FFFFFF')
+                .fillColor(this.showEmojiPicker ? '#FFB800' : '#FFFFFF')
             }
             .width(36)
             .height(36)
@@ -1228,10 +1242,9 @@ struct HomePage {
               this.handleButtonTouch('feed_react_more', e);
             })
             .onClick(() => {
-              const current = this.getCurrentMoment();
-              if (current !== null) {
-                this.handleReact(current.canonicalUid, '😂');
-              }
+              animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+                this.showEmojiPicker = !this.showEmojiPicker;
+              });
             })
           }
         }
@@ -1247,7 +1260,7 @@ struct HomePage {
     }
     .width('100%')
     .layoutWeight(1)
-    .padding({ bottom: 76 })
+    .padding({ top: this.safeTopVp + 56, bottom: this.safeBottomVp + 76 })
     .alignItems(HorizontalAlign.Center)
     .transition(this.buildDirectionalTransition())
   }
@@ -1296,7 +1309,7 @@ struct HomePage {
         .rowsGap(4)
         .width('100%')
         .height('100%')
-        .padding({ left: 8, right: 8, top: 4, bottom: this.safeBottomVp + 96 })
+        .padding({ left: 8, right: 8, top: this.safeTopVp + 68, bottom: this.safeBottomVp + 96 })
         .scrollBar(BarState.Off)
       }
 
@@ -1337,7 +1350,7 @@ struct HomePage {
           this.buildProfileAvatarButton()
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 8, bottom: 10 })
+        .padding({ left: 16, right: 16, top: this.safeTopVp + 8, bottom: 10 })
 
         if (this.isLoadingMessages && this.conversations.length === 0 && this.allFriends.length === 0) {
           Column() {
@@ -1513,35 +1526,11 @@ struct HomePage {
   private buildStationaryBottomNav() {
     Column() {
       Row() {
-        // Left 52x52 circle (Grid shortcut in feed mode; fades without shifting center pill)
-        Column() {
-          Image($r('app.media.ic_grid'))
-            .width(24)
-            .height(24)
-            .fillColor('#FFFFFF')
-        }
-        .width(52)
-        .height(52)
-        .borderRadius(26)
-        .backgroundColor('#CC1A1A1C')
-        .backdropBlur(16)
-        .border({ width: 1, color: '#2E2E30' })
-        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-        .opacity(this.viewMode === 'feed' ? 1 : 0)
-        .scale(this.pressedButtonId === 'feed_grid_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .animation({ duration: 220, curve: Curve.EaseOut })
-        .hitTestBehavior(this.viewMode === 'feed' ? HitTestMode.Default : HitTestMode.None)
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          if (this.viewMode === 'feed') {
-            this.handleButtonTouch('feed_grid_btn', e);
-          }
-        })
-        .onClick(() => {
-          if (this.viewMode === 'feed') {
-            this.switchViewMode('grid');
-          }
-        })
+        // Left 52x52 transparent spacer balancing the right action button so center pill stays fixed
+        Column()
+          .width(52)
+          .height(52)
+          .hitTestBehavior(HitTestMode.None)
 
         Blank()
 
@@ -1641,7 +1630,7 @@ struct HomePage {
 
         Blank()
 
-        // Right 52x52 circle (Share / Delete in feed mode; fades without shifting center pill)
+        // Right 52x52 circle (Share via ShareKit / Delete in feed mode; fades without shifting center pill)
         Column() {
           if (this.isOwnMoment(this.getCurrentMoment())) {
             Image($r('app.media.ic_trash'))
@@ -1680,7 +1669,7 @@ struct HomePage {
           if (current !== null && this.isOwnMoment(current)) {
             this.handleDeleteMoment(current.canonicalUid);
           } else {
-            promptAction.showToast({ message: 'Đã chia sẻ khoảnh khắc Locket' });
+            this.handleShareMoment(current);
           }
         })
       }
@@ -1692,6 +1681,64 @@ struct HomePage {
     .height('100%')
     .justifyContent(FlexAlign.End)
     .hitTestBehavior(HitTestMode.Transparent)
+  }
+
+  @Builder
+  private buildEmojiPickerOverlay() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#4D000000')
+        .onClick(() => {
+          animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+            this.showEmojiPicker = false;
+          });
+        })
+
+      Column() {
+        Grid() {
+          ForEach(this.emojiList, (emoji: string) => {
+            GridItem() {
+              Text(emoji)
+                .fontSize(28)
+                .textAlign(TextAlign.Center)
+                .width('100%')
+                .height(46)
+                .borderRadius(14)
+                .onClick(() => {
+                  animateTo({ duration: 150, curve: Curve.EaseOut }, () => {
+                    this.showEmojiPicker = false;
+                  });
+                  const current = this.getCurrentMoment();
+                  if (current !== null) {
+                    this.handleReact(current.canonicalUid, emoji);
+                  }
+                })
+            }
+          }, (emoji: string) => emoji)
+        }
+        .columnsTemplate('1fr 1fr 1fr 1fr 1fr 1fr')
+        .rowsGap(4)
+        .columnsGap(4)
+        .width('100%')
+        .height(200)
+      }
+      .width('92%')
+      .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+      .margin({ bottom: this.safeBottomVp + 148 })
+      .backgroundColor('#E61C1C1E')
+      .backdropBlur(16)
+      .borderRadius(24)
+      .border({ width: 1, color: '#2E2E30' })
+      .shadow({ radius: 24, color: '#88000000', offsetX: 0, offsetY: 8 })
+      .transition(
+        TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 16 }))
+          .animation({ duration: 200, curve: Curve.EaseOut })
+      )
+    }
+    .width('100%')
+    .height('100%')
   }
 
   @Builder
@@ -1839,10 +1886,6 @@ struct HomePage {
   build() {
     Stack({ alignContent: Alignment.Top }) {
       Column() {
-        if (this.viewMode !== 'messages') {
-          this.buildTopBar()
-        }
-
         if (this.viewMode === 'camera') {
           this.buildCameraMode()
         } else if (this.viewMode === 'feed') {
@@ -1855,10 +1898,18 @@ struct HomePage {
       }
       .width('100%')
       .height('100%')
-      .padding({ top: this.safeTopVp, bottom: this.safeBottomVp })
+
+      // Floating Top Bar overlay (no black header bar; pills float directly over photos/content)
+      if (this.viewMode !== 'messages') {
+        this.buildTopBar()
+      }
 
       // Stationary bottom 3-button nav layer (never slides with tabs)
       this.buildStationaryBottomNav()
+
+      if (this.showEmojiPicker && this.viewMode === 'feed') {
+        this.buildEmojiPickerOverlay()
+      }
 
       if (this.showFriendFilter && (this.viewMode === 'feed' || this.viewMode === 'grid')) {
         this.buildFriendFilterSheet()

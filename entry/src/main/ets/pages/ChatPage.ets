@@ -24,9 +24,16 @@ struct ChatPage {
   @State inputText: string = '';
   @State isSending: boolean = false;
   @State pressedButtonId: string = '';
+  @State showEmojiPicker: boolean = false;
   @StorageProp('safe_top_vp') safeTopVp: number = 38;
   @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
   private listScroller: Scroller = new Scroller();
+  private readonly emojiList: string[] = [
+    '💛', '❤️', '🔥', '😍', '😂', '😭',
+    '🥹', '🥺', '👏', '🙌', '✨', '🎉',
+    '🥰', '😎', '🤔', '😱', '🫶', '💯',
+    '🥳', '😴', '🤍', '🩷', '🫡', '🤣'
+  ];
 
   private handleButtonTouch(id: string, event: TouchEvent): void {
     if (event.type === TouchType.Down) {
@@ -166,12 +173,38 @@ struct ChatPage {
     return msg.text.replace(/\u200b/g, '').trim();
   }
 
+  private getMomentOwnerUid(msg: ChatMessage): string {
+    const thumb = msg.thumbnailUrl ?? '';
+    if (thumb.length > 0) {
+      let decoded = thumb;
+      try {
+        decoded = decodeURIComponent(thumb);
+      } catch (_err) {
+        decoded = thumb;
+      }
+      const marker = 'users/';
+      const idx = decoded.indexOf(marker);
+      if (idx >= 0) {
+        const afterUsers = decoded.substring(idx + marker.length);
+        const slashIdx = afterUsers.indexOf('/');
+        if (slashIdx > 0) {
+          const ownerUid = afterUsers.substring(0, slashIdx);
+          if (ownerUid.length > 0) {
+            return ownerUid;
+          }
+        }
+      }
+    }
+    // Fallback for 1-on-1 moment reply: the replied moment belongs to the other participant
+    return msg.senderUid === this.myUid ? this.friendUid : this.myUid;
+  }
+
   private getCardAuthorName(msg: ChatMessage): string {
-    return msg.senderUid === this.myUid ? this.myName : this.friendName;
+    return this.getMomentOwnerUid(msg) === this.myUid ? this.myName : this.friendName;
   }
 
   private getCardAuthorAvatar(msg: ChatMessage): string {
-    return msg.senderUid === this.myUid ? this.myAvatar : this.friendAvatar;
+    return this.getMomentOwnerUid(msg) === this.myUid ? this.myAvatar : this.friendAvatar;
   }
 
   build() {
@@ -313,30 +346,21 @@ struct ChatPage {
         .scrollBar(BarState.Off)
       }
 
-      // Top-down Smooth 4-stop Gradient Scrim (no full-width backdropBlur)
-      Column()
-        .width('100%')
-        .height(this.safeTopVp + 76)
-        .hitTestBehavior(HitTestMode.Transparent)
-        .linearGradient({
-          direction: GradientDirection.Bottom,
-          colors: [['#F5000000', 0], ['#CC000000', 0.45], ['#59000000', 0.78], ['#00000000', 1]]
-        })
-
-      // Header Controls Row (backdropBlur only on circular pills)
-      Row() {
+      // Floating Header Controls (no black bar/scrim; pills float directly over chat)
+      Row({ space: 10 }) {
         Column() {
           Image($r('app.media.ic_back'))
             .width(20)
             .height(20)
             .fillColor('#FFFFFF')
         }
-        .width(42)
-        .height(42)
+        .width(44)
+        .height(44)
         .backgroundColor('#CC1C1C1E')
         .backdropBlur(16)
-        .borderRadius(21)
-        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .borderRadius(22)
+        .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 16, color: '#66000000', offsetX: 0, offsetY: 4 })
         .scale(this.pressedButtonId === 'chat_back' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
         .justifyContent(FlexAlign.Center)
         .onTouch((e: TouchEvent) => {
@@ -346,66 +370,106 @@ struct ChatPage {
           router.back();
         })
 
-        if (this.friendAvatar.length > 0) {
-          Image(this.friendAvatar)
-            .width(36)
-            .height(36)
-            .borderRadius(18)
-            .objectFit(ImageFit.Cover)
+        Row({ space: 10 }) {
+          if (this.friendAvatar.length > 0) {
+            Image(this.friendAvatar)
+              .width(34)
+              .height(34)
+              .borderRadius(17)
+              .objectFit(ImageFit.Cover)
+              .border({ width: 1.5, color: '#2C2C2E' })
+          } else {
+            Column() {
+              Text(this.friendName.length > 0 ? this.friendName.substring(0, 1).toUpperCase() : 'B')
+                .fontSize(14)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#FFFFFF')
+            }
+            .width(34)
+            .height(34)
+            .borderRadius(17)
+            .backgroundColor('#262628')
             .border({ width: 1.5, color: '#2C2C2E' })
-            .margin({ left: 12 })
-        } else {
-          Column() {
-            Text(this.friendName.length > 0 ? this.friendName.substring(0, 1).toUpperCase() : 'B')
-              .fontSize(15)
-              .fontWeight(FontWeight.Bold)
-              .fontColor('#FFFFFF')
+            .justifyContent(FlexAlign.Center)
           }
-          .width(36)
-          .height(36)
-          .borderRadius(18)
-          .backgroundColor('#262628')
-          .border({ width: 1.5, color: '#2C2C2E' })
-          .justifyContent(FlexAlign.Center)
-          .margin({ left: 12 })
-        }
 
-        Text(this.friendName)
-          .fontSize(19)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .margin({ left: 10 })
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-
-        Column() {
-          Image($r('app.media.ic_flip_camera'))
-            .width(18)
-            .height(18)
-            .fillColor('#FFB800')
+          Text(this.friendName)
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: 200 })
         }
-        .width(40)
-        .height(40)
-        .backgroundColor('#CC1C1C1E')
+        .height(44)
+        .padding({ left: 6, right: 16 })
+        .backgroundColor('#B81C1C1E')
         .backdropBlur(16)
-        .borderRadius(20)
-        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-        .scale(this.pressedButtonId === 'chat_refresh' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('chat_refresh', e);
-        })
-        .onClick(() => {
-          this.loadMessages();
-        })
+        .borderRadius(22)
+        .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 16, color: '#66000000', offsetX: 0, offsetY: 4 })
+
+        Blank()
       }
       .width('100%')
-      .padding({ top: this.safeTopVp + 8, bottom: 14, left: 16, right: 16 })
+      .padding({ top: this.safeTopVp + 8, bottom: 8, left: 16, right: 16 })
       .hitTestBehavior(HitTestMode.Transparent)
 
-      // Bottom-up Smooth 4-stop Fade + Frosted Pill Composer Overlay
+      // Tap-outside backdrop when emoji picker is open
+      if (this.showEmojiPicker) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#4D000000')
+          .onClick(() => {
+            animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+              this.showEmojiPicker = false;
+            });
+          })
+      }
+
+      // Bottom-up Smooth 4-stop Fade + Floating Emoji Picker + Frosted Pill Composer Overlay
       Column() {
+        if (this.showEmojiPicker) {
+          Column() {
+            Grid() {
+              ForEach(this.emojiList, (emoji: string) => {
+                GridItem() {
+                  Text(emoji)
+                    .fontSize(28)
+                    .textAlign(TextAlign.Center)
+                    .width('100%')
+                    .height(46)
+                    .borderRadius(14)
+                    .onClick(() => {
+                      animateTo({ duration: 150, curve: Curve.EaseOut }, () => {
+                        this.showEmojiPicker = false;
+                      });
+                      this.handleSendText(emoji);
+                    })
+                }
+              }, (emoji: string) => emoji)
+            }
+            .columnsTemplate('1fr 1fr 1fr 1fr 1fr 1fr')
+            .rowsGap(4)
+            .columnsGap(4)
+            .width('100%')
+            .height(200)
+          }
+          .width('92%')
+          .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+          .margin({ bottom: 10 })
+          .backgroundColor('#E61C1C1E')
+          .backdropBlur(16)
+          .borderRadius(24)
+          .border({ width: 1, color: '#2E2E30' })
+          .shadow({ radius: 24, color: '#88000000', offsetX: 0, offsetY: 8 })
+          .transition(
+            TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 16 }))
+              .animation({ duration: 200, curve: Curve.EaseOut })
+          )
+        }
+
         Column() {
           Row({ space: 6 }) {
             TextInput({
@@ -490,7 +554,7 @@ struct ChatPage {
                 Image($r('app.media.ic_emoji_add'))
                   .width(20)
                   .height(20)
-                  .fillColor('#FFFFFF')
+                  .fillColor(this.showEmojiPicker ? '#FFB800' : '#FFFFFF')
               }
               .width(34)
               .height(34)
@@ -500,7 +564,9 @@ struct ChatPage {
                 this.handleButtonTouch('chat_react_more', e);
               })
               .onClick(() => {
-                this.handleSendText('😂');
+                animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+                  this.showEmojiPicker = !this.showEmojiPicker;
+                });
               })
             }
           }
@@ -514,7 +580,7 @@ struct ChatPage {
           .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 24, bottom: this.safeBottomVp + 14 })
+        .padding({ left: 16, right: 16, top: 18, bottom: this.safeBottomVp + 14 })
         .hitTestBehavior(HitTestMode.Transparent)
         .linearGradient({
           direction: GradientDirection.Top,
