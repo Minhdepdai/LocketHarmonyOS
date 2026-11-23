@@ -1,0 +1,10 @@
+.hvigor/
+.idea/
+build/
+oh_modules/
+local.properties
+*.hap
+*.app
+.DS_Store
+__pycache__/
+*.pyc

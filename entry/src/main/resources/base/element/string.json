@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Locket HarmonyOS Entry Module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Locket HarmonyOS Main Ability"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Locket"
+    },
+    {
+      "name": "camera_permission_reason",
+      "value": "Used to capture and share moments with your friends on Locket."
+    },
+    {
+      "name": "widget_label",
+      "value": "Locket Widget"
+    },
+    {
+      "name": "widget_desc",
+      "value": "Displays the latest moment from your Locket friends on your home screen."
+    },
+    {
+      "name": "widget_display_name",
+      "value": "Locket"
+    },
+    {
+      "name": "widget_description",
+      "value": "See live photos from your best friends right on your home screen."
+    }
+  ]
+}
