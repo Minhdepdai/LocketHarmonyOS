@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { curves, promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -33,6 +33,7 @@ struct CameraPage {
   @State photoCardY: number = 0;
   @State photoCardOpacity: number = 1.0;
   @State galleryPulseScale: number = 1.0;
+  @State pressedButtonId: string = '';
   @StorageProp('safe_top_vp') safeTopVp: number = 38;
   @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
   private pinchStartZoom: number = 1.0;
@@ -62,13 +63,27 @@ struct CameraPage {
     this.stopLiveCamera();
   }
 
-  private handleShutterTouch(event: TouchEvent): void {
+  private handleButtonTouch(id: string, event: TouchEvent): void {
     if (event.type === TouchType.Down) {
-      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
-        this.shutterScale = 0.92;
+      animateTo({ curve: curves.springMotion(0.35, 0.65) }, () => {
+        this.pressedButtonId = id;
       });
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+      animateTo({ curve: curves.springMotion(0.45, 0.72) }, () => {
+        if (this.pressedButtonId === id) {
+          this.pressedButtonId = '';
+        }
+      });
+    }
+  }
+
+  private handleShutterTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      animateTo({ curve: curves.springMotion(0.35, 0.65) }, () => {
+        this.shutterScale = 0.91;
+      });
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      animateTo({ curve: curves.springMotion(0.45, 0.72) }, () => {
         this.shutterScale = 1.0;
       });
     }
@@ -76,11 +91,11 @@ struct CameraPage {
 
   private handlePostBtnTouch(event: TouchEvent): void {
     if (event.type === TouchType.Down) {
-      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
-        this.postBtnScale = 0.92;
+      animateTo({ curve: curves.springMotion(0.35, 0.65) }, () => {
+        this.postBtnScale = 0.91;
       });
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+      animateTo({ curve: curves.springMotion(0.45, 0.72) }, () => {
         this.postBtnScale = 1.0;
       });
     }
@@ -155,22 +170,37 @@ struct CameraPage {
     if (this.isCapturing) {
       return;
     }
+    const context = getContext(this) as common.UIAbilityContext;
     if (!this.isCameraReady) {
       await this.startLiveCamera();
-      if (!this.isCameraReady) {
-        promptAction.showToast({ message: 'Vui lòng cấp quyền camera để chụp ảnh' });
-        return;
-      }
     }
     this.isCapturing = true;
     try {
-      const context = getContext(this) as common.UIAbilityContext;
-      const filePath = await this.liveCamera.capturePhotoToFile(context);
-      await this.stopLiveCamera();
-      this.selectedPhotoUri = filePath;
+      let filePath = '';
+      if (this.isCameraReady) {
+        try {
+          filePath = await this.liveCamera.capturePhotoToFile(context);
+          await this.stopLiveCamera();
+        } catch (_captureErr) {
+          this.isCameraReady = false;
+          this.zoomRatio = 1.0;
+          filePath = await this.liveCamera.pickPhotoWithSystemCamera(context, this.isFrontCamera);
+        }
+      } else {
+        filePath = await this.liveCamera.pickPhotoWithSystemCamera(context, this.isFrontCamera);
+      }
+
+      if (filePath.length > 0) {
+        this.selectedPhotoUri = filePath;
+      } else if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0) {
+        this.startLiveCamera();
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không thể chụp ảnh';
       promptAction.showToast({ message: msg });
+      if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0) {
+        this.startLiveCamera();
+      }
     } finally {
       this.isCapturing = false;
     }
@@ -272,25 +302,31 @@ struct CameraPage {
   build() {
     Stack({ alignContent: Alignment.Center }) {
       Column() {
-        // Header
+        // Header (48x48 circular buttons, 24x24 icons)
         Row() {
           Column() {
             Image($r('app.media.ic_back'))
-              .width(20)
-              .height(20)
+              .width(24)
+              .height(24)
               .fillColor('#FFFFFF')
           }
-          .width(40)
-          .height(40)
+          .width(48)
+          .height(48)
           .backgroundColor('#1C1C1E')
-          .borderRadius(20)
+          .borderRadius(24)
+          .border({ width: 1, color: '#2E2E30' })
+          .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+          .scale(this.pressedButtonId === 'cam_back' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
           .justifyContent(FlexAlign.Center)
+          .onTouch((e: TouchEvent) => {
+            this.handleButtonTouch('cam_back', e);
+          })
           .onClick(() => {
             router.back();
           })
 
           Text('Gửi đến...')
-            .fontSize(19)
+            .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
             .margin({ left: 12 })
@@ -300,27 +336,39 @@ struct CameraPage {
           if (this.selectedPhotoUri.length === 0) {
             Column() {
               Image($r('app.media.ic_flip_camera'))
-                .width(20)
-                .height(20)
+                .width(24)
+                .height(24)
                 .fillColor('#FFFFFF')
             }
-            .width(40)
-            .height(40)
+            .width(48)
+            .height(48)
             .backgroundColor('#1C1C1E')
-            .borderRadius(20)
+            .borderRadius(24)
+            .border({ width: 1, color: '#2E2E30' })
+            .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+            .scale(this.pressedButtonId === 'cam_flip' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
             .justifyContent(FlexAlign.Center)
+            .onTouch((e: TouchEvent) => {
+              this.handleButtonTouch('cam_flip', e);
+            })
             .onClick(() => {
               this.flipCamera();
             })
           } else {
             Button('Chụp lại')
-              .height(36)
-              .fontSize(13)
+              .height(44)
+              .fontSize(15)
               .fontWeight(FontWeight.Medium)
               .fontColor('#FFB800')
               .backgroundColor('#1C1C1E')
-              .borderRadius(18)
-              .padding({ left: 14, right: 14 })
+              .borderRadius(22)
+              .border({ width: 1, color: '#2E2E30' })
+              .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+              .scale(this.pressedButtonId === 'cam_retake' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+              .padding({ left: 18, right: 18 })
+              .onTouch((e: TouchEvent) => {
+                this.handleButtonTouch('cam_retake', e);
+              })
               .onClick(() => {
                 this.selectedPhotoUri = '';
               })
@@ -330,15 +378,15 @@ struct CameraPage {
         .padding({ left: 16, right: 16, top: 8, bottom: 8 })
 
         Scroll() {
-          Column({ space: 14 }) {
-            // 1:1 Square Viewfinder / Preview with balanced 88% (max 340vp) & 40vp rounded corners
+          Column({ space: 16 }) {
+            // 1:1 Square Viewfinder / Preview (94% width, max 400vp, borderRadius 48)
             Stack({ alignContent: Alignment.Bottom }) {
               if (this.selectedPhotoUri.length > 0) {
                 Image(this.getDisplayPhotoSrc())
                   .width('100%')
                   .aspectRatio(1)
                   .objectFit(ImageFit.Cover)
-                  .borderRadius(40)
+                  .borderRadius(48)
                   .backgroundColor('#141416')
               } else {
                 Stack({ alignContent: Alignment.Center }) {
@@ -356,47 +404,52 @@ struct CameraPage {
                     })
                     .width('100%')
                     .aspectRatio(1)
-                    .borderRadius(40)
+                    .borderRadius(48)
                     .clip(true)
 
                   if (!this.isCameraReady) {
                     Column({ space: 10 }) {
                       Image($r('app.media.ic_heart_locket'))
-                        .width(40)
-                        .height(40)
+                        .width(44)
+                        .height(44)
                         .fillColor('#FFB800')
                       Text('Đang khởi động camera...')
-                        .fontSize(13)
+                        .fontSize(14)
                         .fontColor('#8E8E93')
                     }
                     .width('100%')
                     .aspectRatio(1)
                     .backgroundColor('#141416')
-                    .borderRadius(40)
+                    .borderRadius(48)
                     .border({ width: 1, color: '#2E2E30' })
                     .justifyContent(FlexAlign.Center)
                   }
                 }
                 .width('100%')
                 .aspectRatio(1)
-                .borderRadius(40)
+                .borderRadius(48)
                 .clip(true)
               }
 
               if (this.selectedPhotoUri.length === 0) {
                 Row() {
                   Text(this.formatZoomLabel())
-                    .fontSize(13)
+                    .fontSize(14)
                     .fontWeight(FontWeight.Bold)
                     .fontColor('#FFB800')
                 }
-                .height(32)
-                .padding({ left: 14, right: 14 })
-                .borderRadius(16)
+                .height(34)
+                .padding({ left: 16, right: 16 })
+                .borderRadius(17)
                 .backgroundColor('#991C1C1E')
                 .border({ width: 1, color: '#44FFFFFF' })
+                .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+                .scale(this.pressedButtonId === 'cam_zoom' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
                 .justifyContent(FlexAlign.Center)
-                .margin({ bottom: 14 })
+                .margin({ bottom: 16 })
+                .onTouch((e: TouchEvent) => {
+                  this.handleButtonTouch('cam_zoom', e);
+                })
                 .onClick(() => {
                   this.toggleZoom();
                 })
@@ -410,11 +463,11 @@ struct CameraPage {
                   .padding({ left: 16, right: 16, top: 8, bottom: 8 })
                   .backgroundColor('#993A3A3C')
                   .borderRadius(20)
-                  .margin({ bottom: 14, left: 20, right: 20 })
+                  .margin({ bottom: 16, left: 20, right: 20 })
               }
             }
-            .width('88%')
-            .constraintSize({ maxWidth: 340 })
+            .width('94%')
+            .constraintSize({ maxWidth: 400 })
             .scale({ x: this.photoCardScale, y: this.photoCardScale })
             .translate({ x: this.photoCardX, y: this.photoCardY })
             .opacity(this.photoCardOpacity)
@@ -430,52 +483,129 @@ struct CameraPage {
                 })
             )
 
-            // Pick / Capture Action Row
-            Row({ space: 10 }) {
-              Button(this.isCapturing ? 'Đang chụp...' : 'Chụp ảnh')
-                .layoutWeight(1)
-                .height(48)
-                .fontSize(15)
-                .fontWeight(FontWeight.Bold)
-                .fontColor('#000000')
-                .backgroundColor('#FFB800')
-                .borderRadius(24)
-                .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+            // Capture Shutter Cluster (80x80) or 54vp Action Row
+            if (this.selectedPhotoUri.length === 0) {
+              Row() {
+                Column() {
+                  Image($r('app.media.ic_gallery'))
+                    .width(26)
+                    .height(26)
+                    .fillColor('#FFFFFF')
+                }
+                .width(52)
+                .height(52)
+                .borderRadius(26)
+                .backgroundColor('#1C1C1E')
+                .border({ width: 1, color: '#2E2E30' })
+                .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+                .scale(this.pressedButtonId === 'cam_gallery'
+                  ? { x: 0.91, y: 0.91 }
+                  : { x: this.galleryPulseScale, y: this.galleryPulseScale })
+                .justifyContent(FlexAlign.Center)
+                .onTouch((e: TouchEvent) => {
+                  this.handleButtonTouch('cam_gallery', e);
+                })
+                .onClick(() => {
+                  this.pickFromGallery();
+                })
+
+                Stack({ alignContent: Alignment.Center }) {
+                  Column()
+                    .width(80)
+                    .height(80)
+                    .borderRadius(40)
+                    .backgroundColor('#000000')
+                    .border({ width: 4.5, color: '#FFB800' })
+                    .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
+
+                  Column()
+                    .width(62)
+                    .height(62)
+                    .borderRadius(31)
+                    .backgroundColor(this.isCapturing ? '#FFB800' : '#FFFFFF')
+                }
+                .margin({ left: 32, right: 32 })
                 .scale({ x: this.shutterScale, y: this.shutterScale })
                 .enabled(!this.isCapturing)
                 .onTouch((event: TouchEvent) => {
                   this.handleShutterTouch(event);
                 })
                 .onClick(() => {
-                  if (this.selectedPhotoUri.length > 0) {
-                    this.selectedPhotoUri = '';
-                  } else {
-                    this.captureFromCamera();
-                  }
+                  this.captureFromCamera();
                 })
 
-              Row({ space: 8 }) {
-                Image($r('app.media.ic_gallery'))
-                  .width(18)
-                  .height(18)
-                  .fillColor('#FFFFFF')
-                Text('Thư viện ảnh')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#FFFFFF')
+                Column() {
+                  Image($r('app.media.ic_flip_camera'))
+                    .width(26)
+                    .height(26)
+                    .fillColor('#FFFFFF')
+                }
+                .width(52)
+                .height(52)
+                .borderRadius(26)
+                .backgroundColor('#1C1C1E')
+                .border({ width: 1, color: '#2E2E30' })
+                .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+                .scale(this.pressedButtonId === 'cam_flip_bottom' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+                .justifyContent(FlexAlign.Center)
+                .onTouch((e: TouchEvent) => {
+                  this.handleButtonTouch('cam_flip_bottom', e);
+                })
+                .onClick(() => {
+                  this.flipCamera();
+                })
               }
-              .layoutWeight(1)
-              .height(48)
-              .backgroundColor('#1C1C1E')
-              .borderRadius(24)
-              .border({ width: 1, color: '#2E2E30' })
-              .scale({ x: this.galleryPulseScale, y: this.galleryPulseScale })
+              .width('100%')
               .justifyContent(FlexAlign.Center)
-              .onClick(() => {
-                this.pickFromGallery();
-              })
+              .margin({ top: 4, bottom: 4 })
+            } else {
+              Row({ space: 12 }) {
+                Button('Chụp lại')
+                  .layoutWeight(1)
+                  .height(54)
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#000000')
+                  .backgroundColor('#FFB800')
+                  .borderRadius(27)
+                  .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
+                  .scale({ x: this.shutterScale, y: this.shutterScale })
+                  .onTouch((event: TouchEvent) => {
+                    this.handleShutterTouch(event);
+                  })
+                  .onClick(() => {
+                    this.selectedPhotoUri = '';
+                  })
+
+                Row({ space: 8 }) {
+                  Image($r('app.media.ic_gallery'))
+                    .width(22)
+                    .height(22)
+                    .fillColor('#FFFFFF')
+                  Text('Thư viện ảnh')
+                    .fontSize(16)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor('#FFFFFF')
+                }
+                .layoutWeight(1)
+                .height(54)
+                .backgroundColor('#1C1C1E')
+                .borderRadius(27)
+                .border({ width: 1, color: '#2E2E30' })
+                .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+                .scale(this.pressedButtonId === 'cam_gallery'
+                  ? { x: 0.91, y: 0.91 }
+                  : { x: this.galleryPulseScale, y: this.galleryPulseScale })
+                .justifyContent(FlexAlign.Center)
+                .onTouch((e: TouchEvent) => {
+                  this.handleButtonTouch('cam_gallery', e);
+                })
+                .onClick(() => {
+                  this.pickFromGallery();
+                })
+              }
+              .width('100%')
             }
-            .width('100%')
 
             // Caption Input
             TextInput({
@@ -574,8 +704,8 @@ struct CameraPage {
             .backgroundColor(this.selectedPhotoUri.length > 0 && !this.isUploading ? '#FFB800' : '#1C1C1E')
             .borderRadius(27)
             .shadow(this.selectedPhotoUri.length > 0 && !this.isUploading
-              ? { radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 }
-              : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+              ? { radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 }
+              : { radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
             .scale({ x: this.postBtnScale, y: this.postBtnScale })
             .justifyContent(FlexAlign.Center)
             .enabled(!this.isUploading && this.selectedPhotoUri.length > 0)

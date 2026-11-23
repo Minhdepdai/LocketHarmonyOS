@@ -1,6 +1,6 @@
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { camera } from '@kit.CameraKit';
+import { camera, cameraPicker } from '@kit.CameraKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 
@@ -12,6 +12,7 @@ export class LiveCameraController {
   private photoSession: camera.PhotoSession | null = null;
   private isRunning: boolean = false;
   private isCapturing: boolean = false;
+  private currentIsFront: boolean = false;
   private pendingCaptureContext: common.UIAbilityContext | null = null;
   private pendingResolve: ((path: string) => void) | null = null;
   private pendingReject: ((err: Error) => void) | null = null;
@@ -163,6 +164,7 @@ export class LiveCameraController {
       await session.commitConfig();
       await session.start();
 
+      this.currentIsFront = isFront;
       this.isRunning = true;
       this.currentZoomRatio = 1.0;
       return true;
@@ -217,19 +219,19 @@ export class LiveCameraController {
   }
 
   private handlePhotoAvailable(err: BusinessError, photo: camera.Photo): void {
-    if (err !== undefined && err !== null) {
+    if (err !== undefined && err !== null && err.code !== 0) {
       this.releasePhotoResources(null, photo ?? null);
-      this.rejectPendingCapture(err.message ?? 'Không thể chụp ảnh');
+      this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${err.message ?? 'Không thể chụp ảnh'}`);
       return;
     }
     if (photo === undefined || photo === null) {
-      this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
+      this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Không thể đọc dữ liệu ảnh');
       return;
     }
     const mainImage = photo.main;
     if (mainImage === undefined || mainImage === null) {
       this.releasePhotoResources(null, photo);
-      this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
+      this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Không thể đọc dữ liệu ảnh');
       return;
     }
     const ctx = this.pendingCaptureContext;
@@ -241,13 +243,13 @@ export class LiveCameraController {
     try {
       mainImage.getComponent(image.ComponentType.JPEG, (compErr: BusinessError, component: image.Component) => {
         try {
-          if (compErr !== undefined && compErr !== null) {
-            this.rejectPendingCapture(compErr.message ?? 'Không thể đọc dữ liệu ảnh');
+          if (compErr !== undefined && compErr !== null && compErr.code !== 0) {
+            this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${compErr.message ?? 'Không thể đọc dữ liệu ảnh'}`);
             return;
           }
           if (component === undefined || component === null ||
             component.byteBuffer === undefined || component.byteBuffer.byteLength === 0) {
-            this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
+            this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Không thể đọc dữ liệu ảnh');
             return;
           }
           const copied = new Uint8Array(component.byteBuffer).slice().buffer;
@@ -261,7 +263,7 @@ export class LiveCameraController {
           this.resolvePendingCapture(filePath);
         } catch (writeErr) {
           const msg = writeErr instanceof Error ? writeErr.message : 'Lưu ảnh thất bại';
-          this.rejectPendingCapture(msg);
+          this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${msg}`);
         } finally {
           this.releasePhotoResources(mainImage, photo);
         }
@@ -269,13 +271,13 @@ export class LiveCameraController {
     } catch (e) {
       this.releasePhotoResources(mainImage, photo);
       const msg = e instanceof Error ? e.message : 'Không thể đọc dữ liệu ảnh';
-      this.rejectPendingCapture(msg);
+      this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${msg}`);
     }
   }
 
   public async capturePhotoToFile(context: common.UIAbilityContext): Promise<string> {
     if (this.photoOutput === null || !this.isRunning) {
-      throw new Error('Camera chưa sẵn sàng');
+      throw new Error('CAMERA_CAPTURE_FALLBACK_REQUIRED: Camera chưa sẵn sàng');
     }
     if (this.isCapturing) {
       throw new Error('Đang chụp ảnh...');
@@ -288,22 +290,41 @@ export class LiveCameraController {
       this.pendingResolve = resolve;
       this.pendingReject = reject;
       this.captureTimeoutId = setTimeout(() => {
-        this.rejectPendingCapture('Chụp ảnh quá thời gian chờ');
+        this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Chụp ảnh quá thời gian chờ');
       }, 10000);
 
       try {
         const setting: camera.PhotoCaptureSetting = {
           quality: camera.QualityLevel.QUALITY_LEVEL_HIGH,
-          rotation: camera.ImageRotation.ROTATION_0
+          rotation: camera.ImageRotation.ROTATION_0,
+          mirror: this.currentIsFront
         };
         output.capture(setting).catch((capErr: BusinessError) => {
-          this.rejectPendingCapture(capErr.message ?? 'Chụp ảnh thất bại');
+          this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${capErr.message ?? 'Chụp ảnh thất bại'}`);
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Lỗi camera';
-        this.rejectPendingCapture(msg);
+        this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${msg}`);
       }
     });
+  }
+
+  public async pickPhotoWithSystemCamera(context: common.UIAbilityContext, isFront: boolean): Promise<string> {
+    await this.release();
+    const pickerProfile: cameraPicker.PickerProfile = {
+      cameraPosition: isFront
+        ? camera.CameraPosition.CAMERA_POSITION_FRONT
+        : camera.CameraPosition.CAMERA_POSITION_BACK
+    };
+    const pickerResult: cameraPicker.PickerResult = await cameraPicker.pick(
+      context,
+      [cameraPicker.PickerMediaType.PHOTO],
+      pickerProfile
+    );
+    if (pickerResult.resultCode === 0 && pickerResult.resultUri.length > 0) {
+      return pickerResult.resultUri;
+    }
+    return '';
   }
 
   public async release(): Promise<void> {

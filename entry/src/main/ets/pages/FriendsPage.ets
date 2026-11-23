@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
-import { promptAction, router } from '@kit.ArkUI';
+import { curves, promptAction, router } from '@kit.ArkUI';
 import { FriendItem, getDisplayName, UserProfile } from '../models/LocketModels';
+import { CacheService } from '../services/CacheService';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { SessionManager } from '../services/SessionManager';
 import { ShareService } from '../services/ShareService';
@@ -20,12 +21,32 @@ struct FriendsPage {
   @State myUsername: string = 'locket';
   @State myDisplayName: string = '';
   @State isKnockShareActive: boolean = false;
+  @State pressedButtonId: string = '';
   @StorageProp('safe_top_vp') safeTopVp: number = 38;
   @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
   private isPageVisible: boolean = false;
   private isUsernameLoaded: boolean = false;
 
+  private handleButtonTouch(id: string, event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      animateTo({ curve: curves.springMotion(0.35, 0.65) }, () => {
+        this.pressedButtonId = id;
+      });
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      animateTo({ curve: curves.springMotion(0.45, 0.72) }, () => {
+        if (this.pressedButtonId === id) {
+          this.pressedButtonId = '';
+        }
+      });
+    }
+  }
+
   aboutToAppear(): void {
+    const cached = CacheService.getInstance().getCachedFriends();
+    if (cached.length > 0) {
+      this.friends = cached;
+      this.isLoading = false;
+    }
     this.loadFriends();
     this.loadMyUsername();
   }
@@ -123,13 +144,20 @@ struct FriendsPage {
   }
 
   private async loadFriends(): Promise<void> {
-    this.isLoading = true;
+    const hasCached = this.friends.length > 0;
+    if (!hasCached) {
+      this.isLoading = true;
+    }
     this.errorMessage = '';
     try {
-      this.friends = await LocketApiClient.getInstance().getAllFriends();
+      const fresh = await LocketApiClient.getInstance().getAllFriends();
+      this.friends = fresh;
+      CacheService.getInstance().saveFriends(fresh);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Không thể tải danh sách bạn bè';
-      this.errorMessage = msg;
+      if (!hasCached) {
+        const msg = err instanceof Error ? err.message : 'Không thể tải danh sách bạn bè';
+        this.errorMessage = msg;
+      }
     } finally {
       this.isLoading = false;
     }
@@ -180,6 +208,7 @@ struct FriendsPage {
     try {
       await LocketApiClient.getInstance().removeFriend(friend.uid);
       this.friends = this.friends.filter((f: FriendItem) => f.uid !== friend.uid);
+      CacheService.getInstance().saveFriends(this.friends);
       promptAction.showToast({ message: `Đã xóa ${getDisplayName(friend)} khỏi danh sách bạn bè` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không thể xóa bạn bè';
@@ -208,7 +237,9 @@ struct FriendsPage {
       .borderRadius(28)
       .backgroundColor(bgColor)
       .border(isHighlighted ? { width: 1.5, color: '#FFB800' } : { width: 1, color: '#3A3A3C' })
-      .shadow(isHighlighted ? { radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 } : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+      .shadow(isHighlighted
+        ? { radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 }
+        : { radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
       .justifyContent(FlexAlign.Center)
 
       Text(label)
@@ -219,6 +250,10 @@ struct FriendsPage {
     }
     .layoutWeight(1)
     .alignItems(HorizontalAlign.Center)
+    .scale(this.pressedButtonId === `share_${label}` ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+    .onTouch((e: TouchEvent) => {
+      this.handleButtonTouch(`share_${label}`, e);
+    })
     .onClick(() => {
       onTap();
     })
@@ -290,9 +325,13 @@ struct FriendsPage {
               .fontColor('#000000')
               .backgroundColor('#FFB800')
               .borderRadius(17)
-              .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+              .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
+              .scale(this.pressedButtonId === 'friends_search_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
               .margin({ right: 6 })
               .enabled(!this.isSearching)
+              .onTouch((e: TouchEvent) => {
+                this.handleButtonTouch('friends_search_btn', e);
+              })
               .onClick(() => {
                 this.handleSearchUsername();
               })
@@ -359,8 +398,12 @@ struct FriendsPage {
               .fontColor('#000000')
               .backgroundColor('#FFB800')
               .borderRadius(17)
-              .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+              .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
+              .scale(this.pressedButtonId === 'friends_add_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
               .enabled(!this.isSendingRequest)
+              .onTouch((e: TouchEvent) => {
+                this.handleButtonTouch('friends_add_btn', e);
+              })
               .onClick(() => {
                 if (this.searchResult !== null) {
                   this.handleSendFriendRequest(this.searchResult);
@@ -513,7 +556,11 @@ struct FriendsPage {
                   .fontWeight(FontWeight.Bold)
                   .backgroundColor('#FFB800')
                   .borderRadius(19)
-                  .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+                  .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
+                  .scale(this.pressedButtonId === 'friends_retry_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+                  .onTouch((e: TouchEvent) => {
+                    this.handleButtonTouch('friends_retry_btn', e);
+                  })
                   .onClick(() => {
                     this.loadFriends();
                   })
@@ -578,7 +625,12 @@ struct FriendsPage {
                     .height(36)
                     .borderRadius(18)
                     .backgroundColor('#2C2C2E')
+                    .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+                    .scale(this.pressedButtonId === `friend_chat_${friend.uid}` ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
                     .justifyContent(FlexAlign.Center)
+                    .onTouch((e: TouchEvent) => {
+                      this.handleButtonTouch(`friend_chat_${friend.uid}`, e);
+                    })
                     .onClick(() => {
                       router.pushUrl({
                         url: 'pages/ChatPage',
@@ -601,7 +653,12 @@ struct FriendsPage {
                     .height(36)
                     .borderRadius(18)
                     .backgroundColor('#2C2C2E')
+                    .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+                    .scale(this.pressedButtonId === `friend_rm_${friend.uid}` ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
                     .justifyContent(FlexAlign.Center)
+                    .onTouch((e: TouchEvent) => {
+                      this.handleButtonTouch(`friend_rm_${friend.uid}`, e);
+                    })
                     .onClick(() => {
                       this.handleRemoveFriend(friend);
                     })

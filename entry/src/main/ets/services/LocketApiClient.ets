@@ -284,16 +284,15 @@ interface FirebaseStorageUploadResponse {
 }
 
 interface ResumableUploadMetadata {
-  visibility: string;
   creator: string;
+  visibility: string;
 }
 
 interface ResumableUploadStartBody {
-  bucket: string;
-  contentType: string;
   name: string;
+  contentType: string;
+  bucket: string;
   metadata: ResumableUploadMetadata;
-  cacheControl: string;
 }
 
 interface PostMomentOverlay {
@@ -1026,28 +1025,27 @@ export class LocketApiClient {
     // Step 1: Initiate Firebase Storage resumable upload session
     let uploadUrl = '';
     const startBody: ResumableUploadStartBody = {
-      bucket: '',
-      contentType: contentType,
       name: objectPath,
+      contentType: 'image/*',
+      bucket: '',
       metadata: {
-        visibility: 'private',
-        creator: session.localId
-      },
-      cacheControl: 'public, max-age=604800'
+        creator: session.localId,
+        visibility: 'private'
+      }
     };
 
     const startReq = http.createHttp();
     try {
       const startHeaders: Record<string, string> = {
         'Content-Type': 'application/json; charset=UTF-8',
-        'Authorization': `Firebase ${session.idToken}`,
+        'Authorization': 'Bearer ' + session.idToken,
         'x-goog-upload-protocol': 'resumable',
         'x-goog-upload-command': 'start',
-        'x-goog-upload-content-type': contentType,
-        'x-goog-upload-content-length': `${imageBytes.byteLength}`,
-        'x-firebase-storage-version': 'ios/12.12.1',
-        'x-firebase-gmpid': '1:641029076083:ios:cc8eb46290d69b234fa606',
-        'User-Agent': 'FirebaseAuth.iOS/10.23.1 com.locket.Locket/2.8.0 iPhone/18.0 hw/iPhone12_1 (GTMSUF/1)'
+        'x-goog-upload-content-length': '' + imageBytes.byteLength,
+        'x-goog-upload-content-type': 'image/webp',
+        'x-firebase-storage-version': 'ios/10.13.0',
+        'x-firebase-gmpid': '1:641029076083:ios:cc8eb46290d69b234fa609',
+        'User-Agent': 'com.locket.Locket/1.43.1 iPhone/17.3 hw/iPhone15_3 (GTMSUF/1)'
       };
       const startRes = await startReq.request(initUrl, {
         method: http.RequestMethod.POST,
@@ -1071,7 +1069,7 @@ export class LocketApiClient {
     }
 
     // Step 2: Upload bytes via PUT to resumable session URL
-    let uploadRes: FirebaseStorageUploadResponse;
+    let uploadRes: FirebaseStorageUploadResponse = {};
     const putReq = http.createHttp();
     try {
       const putHeaders: Record<string, string> = {
@@ -1079,7 +1077,7 @@ export class LocketApiClient {
         'x-goog-upload-protocol': 'resumable',
         'x-goog-upload-command': 'upload, finalize',
         'x-goog-upload-offset': '0',
-        'x-goog-upload-content-length': `${imageBytes.byteLength}`
+        'x-goog-upload-content-length': '' + imageBytes.byteLength
       };
       const putRes = await putReq.request(uploadUrl, {
         method: http.RequestMethod.PUT,
@@ -1093,19 +1091,30 @@ export class LocketApiClient {
       if (putRes.responseCode < 200 || putRes.responseCode >= 300) {
         throw new Error(`Resumable upload failed (${putRes.responseCode}): ${rawText}`);
       }
-      uploadRes = JSON.parse(rawText) as FirebaseStorageUploadResponse;
+      if (rawText.trim().length > 0) {
+        uploadRes = JSON.parse(rawText) as FirebaseStorageUploadResponse;
+      }
     } finally {
       putReq.destroy();
     }
 
-    // Step 3: Build Firebase Storage download URL with token
-    const downloadTokens = uploadRes.downloadTokens ?? '';
-    const downloadToken = downloadTokens.split(',')[0];
+    // Step 3: Read downloadTokens (with fallback metadata GET if empty)
+    let downloadTokens = uploadRes.downloadTokens ?? '';
+    let downloadToken = downloadTokens.split(',')[0].trim();
+    if (downloadToken.length === 0) {
+      const metaUrl = `${FIREBASE_STORAGE_BASE}/${encodedPath}`;
+      const metaRes = await this.requestJson<FirebaseStorageUploadResponse>(
+        metaUrl,
+        http.RequestMethod.GET,
+        { 'Authorization': 'Bearer ' + session.idToken }
+      );
+      downloadTokens = metaRes.downloadTokens ?? '';
+      downloadToken = downloadTokens.split(',')[0].trim();
+    }
     if (downloadToken.length === 0) {
       throw new Error('Không nhận được token tải ảnh');
     }
-    const thumbnailUrl = 'https://firebasestorage.googleapis.com:443/v0/b/locket-img/o/' +
-      encodedPath + '?alt=media&token=' + encodeURIComponent(downloadToken);
+    const thumbnailUrl = `${FIREBASE_STORAGE_BASE}/${encodedPath}?alt=media&token=${downloadToken}`;
 
     // Step 4: Publish moment via postMomentV2
     const nowSec = Math.floor(Date.now() / 1000);

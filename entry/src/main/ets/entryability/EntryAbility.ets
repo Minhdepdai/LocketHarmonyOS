@@ -2,6 +2,7 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { display, window } from '@kit.ArkUI';
 import { WidgetMomentData } from '../models/LocketModels';
+import { CacheService } from '../services/CacheService';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { NotificationService } from '../services/NotificationService';
 import { SessionManager } from '../services/SessionManager';
@@ -124,6 +125,7 @@ export default class EntryAbility extends UIAbility {
       const sessionMgr = SessionManager.getInstance();
       if (!this.isSessionInitialized) {
         await sessionMgr.init(this.context);
+        await CacheService.getInstance().init(this.context);
         this.isSessionInitialized = true;
       }
       sessionMgr.syncAuthAppStorage();
@@ -142,6 +144,7 @@ export default class EntryAbility extends UIAbility {
       if (feed.moments.length === 0) {
         return;
       }
+      await CacheService.getInstance().saveMoments(feed.moments);
 
       const latest = feed.moments[0];
       if (latest.canonicalUid.length > 0 && latest.canonicalUid !== previousUid) {
@@ -181,6 +184,7 @@ export default class EntryAbility extends UIAbility {
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
     await this.configureImmersiveWindow(windowStage);
     await SessionManager.getInstance().init(this.context);
+    await CacheService.getInstance().init(this.context);
     this.isSessionInitialized = true;
     SessionManager.getInstance().syncAuthAppStorage();
 

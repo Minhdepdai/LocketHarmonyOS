@@ -1,4 +1,4 @@
-import { promptAction, router } from '@kit.ArkUI';
+import { curves, promptAction, router } from '@kit.ArkUI';
 import { LocketApiClient } from '../services/LocketApiClient';
 
 const PHONE_DOT_ROWS: number[] = [0, 1, 2];
@@ -13,16 +13,31 @@ struct LoginPage {
   @State isLoading: boolean = false;
   @State errorMessage: string = '';
   @State primaryBtnScale: number = 1.0;
+  @State pressedButtonId: string = '';
   @StorageProp('safe_top_vp') safeTopVp: number = 38;
   @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
 
-  private handlePrimaryTouch(event: TouchEvent): void {
+  private handleButtonTouch(id: string, event: TouchEvent): void {
     if (event.type === TouchType.Down) {
-      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
-        this.primaryBtnScale = 0.92;
+      animateTo({ curve: curves.springMotion(0.35, 0.65) }, () => {
+        this.pressedButtonId = id;
       });
     } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+      animateTo({ curve: curves.springMotion(0.45, 0.72) }, () => {
+        if (this.pressedButtonId === id) {
+          this.pressedButtonId = '';
+        }
+      });
+    }
+  }
+
+  private handlePrimaryTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      animateTo({ curve: curves.springMotion(0.35, 0.65) }, () => {
+        this.primaryBtnScale = 0.91;
+      });
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      animateTo({ curve: curves.springMotion(0.45, 0.72) }, () => {
         this.primaryBtnScale = 1.0;
       });
     }
@@ -200,7 +215,7 @@ struct LoginPage {
         .fontColor('#000000')
         .backgroundColor('#FFB800')
         .borderRadius(27)
-        .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+        .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
         .scale({ x: this.primaryBtnScale, y: this.primaryBtnScale })
         .onTouch((event: TouchEvent) => {
           this.handlePrimaryTouch(event);
@@ -215,6 +230,10 @@ struct LoginPage {
         .fontWeight(FontWeight.Bold)
         .fontColor('#FFFFFF')
         .padding({ top: 18, bottom: 24, left: 24, right: 24 })
+        .scale(this.pressedButtonId === 'login_signin_text' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+        .onTouch((e: TouchEvent) => {
+          this.handleButtonTouch('login_signin_text', e);
+        })
         .onClick(() => {
           this.errorMessage = '';
           this.step = 1;
@@ -240,7 +259,12 @@ struct LoginPage {
         .height(44)
         .backgroundColor('#1C1C1E')
         .borderRadius(22)
+        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .scale(this.pressedButtonId === 'login_email_back' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
         .justifyContent(FlexAlign.Center)
+        .onTouch((e: TouchEvent) => {
+          this.handleButtonTouch('login_email_back', e);
+        })
         .onClick(() => {
           this.errorMessage = '';
           this.step = 0;
@@ -289,8 +313,13 @@ struct LoginPage {
         .backgroundColor('#1C1C1E')
         .borderRadius(18)
         .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .scale(this.pressedButtonId === 'login_phone_chip' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
         .padding({ left: 16, right: 16 })
         .margin({ top: 18 })
+        .onTouch((e: TouchEvent) => {
+          this.handleButtonTouch('login_phone_chip', e);
+        })
         .onClick(() => {
           promptAction.showToast({ message: 'Vui lòng sử dụng địa chỉ email Locket để đăng nhập' });
         })
@@ -313,8 +342,8 @@ struct LoginPage {
         .backgroundColor(this.email.trim().length > 0 ? '#FFB800' : '#1C1C1E')
         .borderRadius(27)
         .shadow(this.email.trim().length > 0
-          ? { radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 }
-          : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+          ? { radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 }
+          : { radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
         .scale({ x: this.primaryBtnScale, y: this.primaryBtnScale })
         .enabled(this.email.trim().length > 0)
         .margin({ bottom: 24 })
@@ -350,7 +379,12 @@ struct LoginPage {
         .height(44)
         .backgroundColor('#1C1C1E')
         .borderRadius(22)
+        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .scale(this.pressedButtonId === 'login_pw_back' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
         .justifyContent(FlexAlign.Center)
+        .onTouch((e: TouchEvent) => {
+          this.handleButtonTouch('login_pw_back', e);
+        })
         .onClick(() => {
           this.errorMessage = '';
           this.step = 1;
@@ -399,8 +433,13 @@ struct LoginPage {
         .backgroundColor('#1C1C1E')
         .borderRadius(18)
         .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .scale(this.pressedButtonId === 'login_forgot_chip' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
         .padding({ left: 16, right: 16 })
         .margin({ top: 18 })
+        .onTouch((e: TouchEvent) => {
+          this.handleButtonTouch('login_forgot_chip', e);
+        })
         .onClick(() => {
           promptAction.showToast({ message: 'Vui lòng đặt lại mật khẩu qua email đã đăng ký' });
         })
@@ -425,8 +464,8 @@ struct LoginPage {
         .backgroundColor(this.password.length > 0 && !this.isLoading ? '#FFB800' : '#1C1C1E')
         .borderRadius(27)
         .shadow(this.password.length > 0 && !this.isLoading
-          ? { radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 }
-          : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+          ? { radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 }
+          : { radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
         .scale({ x: this.primaryBtnScale, y: this.primaryBtnScale })
         .enabled(this.password.length > 0 && !this.isLoading)
         .margin({ bottom: 24 })

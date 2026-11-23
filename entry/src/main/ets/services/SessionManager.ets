@@ -3,6 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AuthSession, WidgetMomentData } from '../models/LocketModels';
+import { CacheService } from './CacheService';
 
 const PREF_NAME = 'locket_session_store';
 const KEY_SESSION = 'auth_session_json';
@@ -193,6 +194,7 @@ export class SessionManager {
       await this.pref.delete(KEY_WIDGET_MOMENT);
       await this.pref.flush();
     }
+    await CacheService.getInstance().clearAll();
     this.syncAuthAppStorage();
   }
 

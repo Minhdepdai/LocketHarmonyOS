@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { promptAction, router } from '@kit.ArkUI';
+import { curves, promptAction, router } from '@kit.ArkUI';
 import { getDisplayName, UserProfile } from '../models/LocketModels';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { SessionManager } from '../services/SessionManager';
@@ -12,8 +12,23 @@ struct ProfilePage {
   @State userEmail: string = '';
   @State streakOnWidget: boolean = true;
   @State isLoading: boolean = true;
+  @State pressedButtonId: string = '';
   @StorageProp('safe_top_vp') safeTopVp: number = 38;
   @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
+
+  private handleButtonTouch(id: string, event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      animateTo({ curve: curves.springMotion(0.35, 0.65) }, () => {
+        this.pressedButtonId = id;
+      });
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      animateTo({ curve: curves.springMotion(0.45, 0.72) }, () => {
+        if (this.pressedButtonId === id) {
+          this.pressedButtonId = '';
+        }
+      });
+    }
+  }
 
   aboutToAppear(): void {
     this.loadProfile();
@@ -145,7 +160,12 @@ struct ProfilePage {
         .height(44)
         .backgroundColor('#1C1C1E')
         .borderRadius(22)
+        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .scale(this.pressedButtonId === 'profile_back' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
         .justifyContent(FlexAlign.Center)
+        .onTouch((e: TouchEvent) => {
+          this.handleButtonTouch('profile_back', e);
+        })
         .onClick(() => {
           router.back();
         })
@@ -196,6 +216,10 @@ struct ProfilePage {
               .fontWeight(FontWeight.Medium)
               .fontColor('#FFB800')
               .margin({ top: 6 })
+              .scale(this.pressedButtonId === 'profile_edit_photo' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+              .onTouch((e: TouchEvent) => {
+                this.handleButtonTouch('profile_edit_photo', e);
+              })
               .onClick(() => {
                 promptAction.showToast({ message: 'Cập nhật ảnh đại diện trên Locket' });
               })
@@ -242,6 +266,11 @@ struct ProfilePage {
           .backgroundColor('#2A2210')
           .borderRadius(18)
           .border({ width: 1, color: '#5A4614' })
+          .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+          .scale(this.pressedButtonId === 'profile_gold' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+          .onTouch((e: TouchEvent) => {
+            this.handleButtonTouch('profile_gold', e);
+          })
           .onClick(() => {
             promptAction.showToast({ message: 'Locket Gold đang khả dụng trên tài khoản của bạn' });
           })
@@ -269,7 +298,12 @@ struct ProfilePage {
               .backgroundColor('#000000')
               .borderRadius(17)
               .border({ width: 1.5, color: '#FFB800' })
+              .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
+              .scale(this.pressedButtonId === 'profile_rollcall' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
               .padding({ left: 14, right: 14 })
+              .onTouch((e: TouchEvent) => {
+                this.handleButtonTouch('profile_rollcall', e);
+              })
               .onClick(() => {
                 router.pushUrl({ url: 'pages/CameraPage' });
               })
@@ -305,6 +339,7 @@ struct ProfilePage {
             .height(38)
             .borderRadius(19)
             .backgroundColor('#262628')
+            .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
             .justifyContent(FlexAlign.Center)
           }
           .width('100%')
@@ -312,6 +347,11 @@ struct ProfilePage {
           .backgroundColor('#1C1C1E')
           .borderRadius(18)
           .border({ width: 1, color: '#2E2E30' })
+          .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+          .scale(this.pressedButtonId === 'profile_invite' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+          .onTouch((e: TouchEvent) => {
+            this.handleButtonTouch('profile_invite', e);
+          })
           .onClick(() => {
             this.handleShareInvite();
           })
