@@ -1,5 +1,8 @@
 import { promptAction, router } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { getDisplayName, MomentItem, UserProfile } from '../models/LocketModels';
+import { LiveCameraController } from '../services/LiveCameraController';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { SessionManager } from '../services/SessionManager';
 
@@ -25,8 +28,13 @@ struct HomePage {
   @State replyText: string = '';
   @State isSendingReply: boolean = false;
   @State isFrontCamera: boolean = false;
+  @State isCameraReady: boolean = false;
+  @State isCapturing: boolean = false;
   private viewedMomentIds: Set<string> = new Set();
   private swiperController: SwiperController = new SwiperController();
+  private xComponentController: XComponentController = new XComponentController();
+  private liveCamera: LiveCameraController = new LiveCameraController();
+  private cameraSurfaceId: string = '';
 
   aboutToAppear(): void {
     const params = router.getParams() as HomeRouteParams | undefined;
@@ -38,6 +46,107 @@ struct HomePage {
     this.loadInitialData();
   }
 
+  onPageShow(): void {
+    if (!SessionManager.getInstance().isLoggedIn()) {
+      router.clear();
+      router.replaceUrl({ url: 'pages/LoginPage' });
+      return;
+    }
+    if (this.viewMode === 'camera' && this.cameraSurfaceId.length > 0 && !this.liveCamera.isSessionRunning()) {
+      this.startLiveCamera();
+    }
+  }
+
+  onPageHide(): void {
+    this.stopLiveCamera();
+  }
+
+  aboutToDisappear(): void {
+    this.stopLiveCamera();
+  }
+
+  private switchViewMode(targetMode: string): void {
+    if (this.viewMode === targetMode) {
+      return;
+    }
+    if (this.viewMode === 'camera' && targetMode !== 'camera') {
+      this.stopLiveCamera();
+    }
+    animateTo({ duration: 260, curve: Curve.EaseInOut }, () => {
+      this.viewMode = targetMode;
+    });
+  }
+
+  private async startLiveCamera(): Promise<void> {
+    if (this.cameraSurfaceId.length === 0 || this.viewMode !== 'camera') {
+      return;
+    }
+    const context = getContext(this) as common.UIAbilityContext;
+    const started = await this.liveCamera.startSession(context, this.cameraSurfaceId, this.isFrontCamera);
+    this.isCameraReady = started;
+  }
+
+  private async stopLiveCamera(): Promise<void> {
+    this.isCameraReady = false;
+    await this.liveCamera.release();
+  }
+
+  private async flipCamera(): Promise<void> {
+    this.isFrontCamera = !this.isFrontCamera;
+    if (this.viewMode === 'camera' && this.cameraSurfaceId.length > 0) {
+      await this.startLiveCamera();
+    }
+    promptAction.showToast({ message: this.isFrontCamera ? 'Đã chuyển camera trước' : 'Đã chuyển camera sau' });
+  }
+
+  private async handleShutterCapture(): Promise<void> {
+    if (this.isCapturing) {
+      return;
+    }
+    if (!this.isCameraReady) {
+      await this.startLiveCamera();
+      if (!this.isCameraReady) {
+        router.pushUrl({ url: 'pages/CameraPage' });
+        return;
+      }
+    }
+    this.isCapturing = true;
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      const filePath = await this.liveCamera.capturePhotoToFile(context);
+      await this.stopLiveCamera();
+      router.pushUrl({
+        url: 'pages/CameraPage',
+        params: { capturedPhotoPath: filePath }
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không thể chụp ảnh';
+      promptAction.showToast({ message: msg });
+    } finally {
+      this.isCapturing = false;
+    }
+  }
+
+  private async pickFromGallery(): Promise<void> {
+    try {
+      const options = new photoAccessHelper.PhotoSelectOptions();
+      options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      options.maxSelectNumber = 1;
+      const picker = new photoAccessHelper.PhotoViewPicker();
+      const result = await picker.select(options);
+      if (result.photoUris.length > 0) {
+        await this.stopLiveCamera();
+        router.pushUrl({
+          url: 'pages/CameraPage',
+          params: { capturedPhotoPath: result.photoUris[0] }
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không thể mở thư viện ảnh';
+      promptAction.showToast({ message: msg });
+    }
+  }
+
   private async loadInitialData(): Promise<void> {
     this.isLoading = true;
     this.errorMessage = '';
@@ -46,6 +155,7 @@ struct HomePage {
     try {
       const session = SessionManager.getInstance().getSession();
       if (session === null) {
+        router.clear();
         router.replaceUrl({ url: 'pages/LoginPage' });
         return;
       }
@@ -294,23 +404,49 @@ struct HomePage {
   @Builder
   private buildCameraMode() {
     Column() {
-      // Large 1:1 rounded viewfinder
+      // Large 1:1 rounded live viewfinder
       Stack({ alignContent: Alignment.Bottom }) {
-        Column() {
-          Text('📷')
-            .fontSize(44)
-            .opacity(0.65)
-          Text(this.isFrontCamera ? 'Camera trước • Chạm để chụp' : 'Chạm để chụp hoặc chọn ảnh')
-            .fontSize(14)
-            .fontColor('#8E8E93')
-            .margin({ top: 10 })
+        Stack({ alignContent: Alignment.Center }) {
+          XComponent({
+            id: 'locket_home_camera',
+            type: XComponentType.SURFACE,
+            controller: this.xComponentController
+          })
+            .onLoad(() => {
+              this.cameraSurfaceId = this.xComponentController.getXComponentSurfaceId();
+              this.startLiveCamera();
+            })
+            .onDestroy(() => {
+              this.stopLiveCamera();
+            })
+            .width('100%')
+            .aspectRatio(1)
+            .borderRadius(56)
+            .clip(true)
+
+          if (!this.isCameraReady) {
+            Column() {
+              Text('📷')
+                .fontSize(44)
+                .opacity(0.65)
+              Text(this.isFrontCamera ? 'Camera trước • Chạm để chụp' : 'Chạm để chụp hoặc chọn ảnh')
+                .fontSize(14)
+                .fontColor('#8E8E93')
+                .margin({ top: 10 })
+            }
+            .width('100%')
+            .aspectRatio(1)
+            .borderRadius(56)
+            .backgroundColor('#141416')
+            .border({ width: 1, color: '#2E2E30' })
+            .justifyContent(FlexAlign.Center)
+          }
         }
         .width('100%')
         .aspectRatio(1)
         .borderRadius(56)
-        .backgroundColor('#141416')
+        .clip(true)
         .border({ width: 1, color: '#2E2E30' })
-        .justifyContent(FlexAlign.Center)
 
         // Subtle zoom badge inside viewfinder
         Text('1x')
@@ -326,7 +462,7 @@ struct HomePage {
       .padding({ left: 12, right: 12 })
       .margin({ top: 8 })
       .onClick(() => {
-        router.pushUrl({ url: 'pages/CameraPage' });
+        this.handleShutterCapture();
       })
 
       Blank()
@@ -345,7 +481,7 @@ struct HomePage {
         .border({ width: 1, color: '#2E2E30' })
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
-          router.pushUrl({ url: 'pages/CameraPage' });
+          this.pickFromGallery();
         })
 
         // Center big 84x84 Shutter circle (#FFB800 4vp ring + black gap + inner circle)
@@ -361,11 +497,11 @@ struct HomePage {
             .width(68)
             .height(68)
             .borderRadius(34)
-            .backgroundColor('#FFFFFF')
+            .backgroundColor(this.isCapturing ? '#FFB800' : '#FFFFFF')
         }
         .margin({ left: 36, right: 36 })
         .onClick(() => {
-          router.pushUrl({ url: 'pages/CameraPage' });
+          this.handleShutterCapture();
         })
 
         // Right Flip icon
@@ -380,8 +516,7 @@ struct HomePage {
         .border({ width: 1, color: '#2E2E30' })
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
-          this.isFrontCamera = !this.isFrontCamera;
-          promptAction.showToast({ message: this.isFrontCamera ? 'Đã chuyển camera trước' : 'Đã chuyển camera sau' });
+          this.flipCamera();
         })
       }
       .width('100%')
@@ -405,7 +540,7 @@ struct HomePage {
       .padding({ left: 16, right: 16, top: 10, bottom: 10 })
       .margin({ top: 14 })
       .onClick(() => {
-        this.viewMode = 'feed';
+        this.switchViewMode('feed');
       })
 
       // Bottom floating pill nav
@@ -421,7 +556,7 @@ struct HomePage {
         .borderRadius(22)
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
-          this.viewMode = 'grid';
+          this.switchViewMode('grid');
         })
 
         // Home highlighted pill
@@ -437,7 +572,7 @@ struct HomePage {
         .backgroundColor('#262628')
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
-          this.viewMode = 'camera';
+          this.switchViewMode('camera');
         })
 
         // Chat icon
@@ -461,6 +596,7 @@ struct HomePage {
     }
     .width('100%')
     .layoutWeight(1)
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 })).animation({ duration: 240, curve: Curve.EaseOut }))
   }
 
   @Builder
@@ -705,7 +841,7 @@ struct HomePage {
         .border({ width: 1, color: '#2E2E30' })
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
-          this.viewMode = 'grid';
+          this.switchViewMode('grid');
         })
 
         Blank()
@@ -715,7 +851,7 @@ struct HomePage {
           Text('📅')
             .fontSize(19)
             .onClick(() => {
-              this.viewMode = 'grid';
+              this.switchViewMode('grid');
             })
 
           Stack({ alignContent: Alignment.Center }) {
@@ -732,7 +868,7 @@ struct HomePage {
               .backgroundColor('#FFFFFF')
           }
           .onClick(() => {
-            this.viewMode = 'camera';
+            this.switchViewMode('camera');
           })
 
           Text('💬')
@@ -787,6 +923,7 @@ struct HomePage {
     }
     .width('100%')
     .layoutWeight(1)
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 })).animation({ duration: 240, curve: Curve.EaseOut }))
   }
 
   @Builder
@@ -823,7 +960,7 @@ struct HomePage {
                 .backgroundColor('#1C1C1E')
                 .onClick(() => {
                   this.currentIndex = idx;
-                  this.viewMode = 'feed';
+                  this.switchViewMode('feed');
                 })
             }
           }, (item: MomentItem) => item.canonicalUid)
@@ -843,7 +980,7 @@ struct HomePage {
           .fontSize(21)
           .fontColor('#FFB800')
           .onClick(() => {
-            this.viewMode = 'grid';
+            this.switchViewMode('grid');
           })
 
         Stack({ alignContent: Alignment.Center }) {
@@ -860,7 +997,7 @@ struct HomePage {
             .backgroundColor('#FFFFFF')
         }
         .onClick(() => {
-          this.viewMode = 'camera';
+          this.switchViewMode('camera');
         })
 
         Text('💬')
@@ -878,6 +1015,7 @@ struct HomePage {
     }
     .width('100%')
     .layoutWeight(1)
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 })).animation({ duration: 240, curve: Curve.EaseOut }))
   }
 
   build() {

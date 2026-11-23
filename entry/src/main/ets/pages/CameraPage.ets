@@ -1,10 +1,14 @@
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import { camera, cameraPicker } from '@kit.CameraKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { FriendItem, getDisplayName, UploadMomentOptions } from '../models/LocketModels';
+import { LiveCameraController } from '../services/LiveCameraController';
 import { LocketApiClient } from '../services/LocketApiClient';
+
+interface CameraRouteParams {
+  capturedPhotoPath?: string;
+}
 
 @Entry
 @Component
@@ -16,9 +20,55 @@ struct CameraPage {
   @State selectedFriendUids: string[] = [];
   @State isLoadingFriends: boolean = false;
   @State isUploading: boolean = false;
+  @State isFrontCamera: boolean = false;
+  @State isCameraReady: boolean = false;
+  @State isCapturing: boolean = false;
+  private cameraSurfaceId: string = '';
+  private xComponentController: XComponentController = new XComponentController();
+  private liveCamera: LiveCameraController = new LiveCameraController();
 
   aboutToAppear(): void {
+    const params = router.getParams() as CameraRouteParams | undefined;
+    if (params !== undefined && params.capturedPhotoPath !== undefined && params.capturedPhotoPath.length > 0) {
+      this.selectedPhotoUri = params.capturedPhotoPath;
+    }
     this.loadFriends();
+  }
+
+  onPageShow(): void {
+    if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0 && !this.liveCamera.isSessionRunning()) {
+      this.startLiveCamera();
+    }
+  }
+
+  onPageHide(): void {
+    this.stopLiveCamera();
+  }
+
+  aboutToDisappear(): void {
+    this.stopLiveCamera();
+  }
+
+  private async startLiveCamera(): Promise<void> {
+    if (this.cameraSurfaceId.length === 0) {
+      return;
+    }
+    const context = getContext(this) as common.UIAbilityContext;
+    const started = await this.liveCamera.startSession(context, this.cameraSurfaceId, this.isFrontCamera);
+    this.isCameraReady = started;
+  }
+
+  private async stopLiveCamera(): Promise<void> {
+    this.isCameraReady = false;
+    await this.liveCamera.release();
+  }
+
+  private async flipCamera(): Promise<void> {
+    this.isFrontCamera = !this.isFrontCamera;
+    if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0) {
+      await this.startLiveCamera();
+    }
+    promptAction.showToast({ message: this.isFrontCamera ? 'Đã chuyển camera trước' : 'Đã chuyển camera sau' });
   }
 
   private async loadFriends(): Promise<void> {
@@ -40,6 +90,7 @@ struct CameraPage {
       const picker = new photoAccessHelper.PhotoViewPicker();
       const result = await picker.select(options);
       if (result.photoUris.length > 0) {
+        await this.stopLiveCamera();
         this.selectedPhotoUri = result.photoUris[0];
       }
     } catch (err) {
@@ -49,23 +100,35 @@ struct CameraPage {
   }
 
   private async captureFromCamera(): Promise<void> {
+    if (this.isCapturing) {
+      return;
+    }
+    if (!this.isCameraReady) {
+      await this.startLiveCamera();
+      if (!this.isCameraReady) {
+        promptAction.showToast({ message: 'Vui lòng cấp quyền camera để chụp ảnh' });
+        return;
+      }
+    }
+    this.isCapturing = true;
     try {
       const context = getContext(this) as common.UIAbilityContext;
-      const pickerProfile: cameraPicker.PickerProfile = {
-        cameraPosition: camera.CameraPosition.CAMERA_POSITION_BACK
-      };
-      const result = await cameraPicker.pick(
-        context,
-        [cameraPicker.PickerMediaType.PHOTO],
-        pickerProfile
-      );
-      if (result.resultCode === 0 && result.resultUri.length > 0) {
-        this.selectedPhotoUri = result.resultUri;
-      }
+      const filePath = await this.liveCamera.capturePhotoToFile(context);
+      await this.stopLiveCamera();
+      this.selectedPhotoUri = filePath;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Không thể mở camera';
+      const msg = err instanceof Error ? err.message : 'Không thể chụp ảnh';
       promptAction.showToast({ message: msg });
+    } finally {
+      this.isCapturing = false;
     }
+  }
+
+  private getDisplayPhotoSrc(): string {
+    if (this.selectedPhotoUri.startsWith('/')) {
+      return `file://${this.selectedPhotoUri}`;
+    }
+    return this.selectedPhotoUri;
   }
 
   private toggleFriendSelection(uid: string): void {
@@ -148,35 +211,85 @@ struct CameraPage {
           .margin({ left: 14 })
 
         Blank()
+
+        if (this.selectedPhotoUri.length === 0) {
+          Button('🔄')
+            .width(44)
+            .height(44)
+            .fontSize(18)
+            .fontColor('#FFFFFF')
+            .backgroundColor('#1C1C1E')
+            .borderRadius(22)
+            .onClick(() => {
+              this.flipCamera();
+            })
+        } else {
+          Button('Chụp lại')
+            .height(36)
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#FFB800')
+            .backgroundColor('#1C1C1E')
+            .borderRadius(18)
+            .padding({ left: 14, right: 14 })
+            .onClick(() => {
+              this.selectedPhotoUri = '';
+            })
+        }
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 14, bottom: 12 })
 
       Scroll() {
         Column({ space: 14 }) {
-          // 1:1 Square Preview with Locket 48vp rounded corners
+          // 1:1 Square Viewfinder / Preview with Locket 48vp rounded corners
           Stack({ alignContent: Alignment.Bottom }) {
             if (this.selectedPhotoUri.length > 0) {
-              Image(this.selectedPhotoUri)
+              Image(this.getDisplayPhotoSrc())
                 .width('100%')
                 .aspectRatio(1)
                 .objectFit(ImageFit.Cover)
                 .borderRadius(48)
                 .backgroundColor('#141416')
             } else {
-              Column({ space: 10 }) {
-                Text('📷')
-                  .fontSize(44)
-                Text('Chụp ảnh hoặc chọn từ thư viện')
-                  .fontSize(14)
-                  .fontColor('#8E8E93')
+              Stack({ alignContent: Alignment.Center }) {
+                XComponent({
+                  id: 'locket_camera_page_preview',
+                  type: XComponentType.SURFACE,
+                  controller: this.xComponentController
+                })
+                  .onLoad(() => {
+                    this.cameraSurfaceId = this.xComponentController.getXComponentSurfaceId();
+                    this.startLiveCamera();
+                  })
+                  .onDestroy(() => {
+                    this.stopLiveCamera();
+                  })
+                  .width('100%')
+                  .aspectRatio(1)
+                  .borderRadius(48)
+                  .clip(true)
+
+                if (!this.isCameraReady) {
+                  Column({ space: 8 }) {
+                    Text('📷')
+                      .fontSize(40)
+                    Text('Đang khởi động camera...')
+                      .fontSize(13)
+                      .fontColor('#8E8E93')
+                  }
+                  .width('100%')
+                  .aspectRatio(1)
+                  .backgroundColor('#141416')
+                  .borderRadius(48)
+                  .border({ width: 1, color: '#2E2E30' })
+                  .justifyContent(FlexAlign.Center)
+                }
               }
               .width('100%')
               .aspectRatio(1)
-              .backgroundColor('#141416')
               .borderRadius(48)
-              .border({ width: 1, color: '#2E2E30' })
-              .justifyContent(FlexAlign.Center)
+              .clip(true)
             }
 
             if (this.selectedPhotoUri.length > 0 && this.caption.trim().length > 0) {
@@ -194,7 +307,7 @@ struct CameraPage {
 
           // Pick / Capture Action Row
           Row({ space: 10 }) {
-            Button('Chụp ảnh')
+            Button(this.isCapturing ? 'Đang chụp...' : 'Chụp ảnh')
               .layoutWeight(1)
               .height(48)
               .fontSize(15)
@@ -202,8 +315,13 @@ struct CameraPage {
               .fontColor('#000000')
               .backgroundColor('#FFB800')
               .borderRadius(24)
+              .enabled(!this.isCapturing)
               .onClick(() => {
-                this.captureFromCamera();
+                if (this.selectedPhotoUri.length > 0) {
+                  this.selectedPhotoUri = '';
+                } else {
+                  this.captureFromCamera();
+                }
               })
 
             Button('Thư viện ảnh')

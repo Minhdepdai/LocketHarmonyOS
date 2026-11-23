@@ -58,6 +58,7 @@ export interface ChatMessage {
   text: string;
   momentUid: string;
   createdAtMs: number;
+  thumbnailUrl?: string;
 }
 
 export interface UploadMomentOptions {

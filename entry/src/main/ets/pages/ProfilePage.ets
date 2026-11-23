@@ -20,6 +20,7 @@ struct ProfilePage {
     try {
       const session = SessionManager.getInstance().getSession();
       if (session === null) {
+        router.clear();
         router.replaceUrl({ url: 'pages/LoginPage' });
         return;
       }
@@ -61,6 +62,7 @@ struct ProfilePage {
 
   private async handleLogout(): Promise<void> {
     await SessionManager.getInstance().clearSession();
+    router.clear();
     router.replaceUrl({ url: 'pages/LoginPage' });
   }
 

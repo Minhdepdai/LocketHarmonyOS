@@ -16,6 +16,7 @@ const FIREBASE_AUTH_URL = `https://identitytoolkit.googleapis.com/v1/accounts:si
 const FIREBASE_REFRESH_URL = `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`;
 const LOCKET_API_BASE = 'https://api.locketcamera.com';
 const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/locket-4252a/databases/(default)/documents';
+const FIRESTORE_LOCKET_BASE = 'https://firestore.googleapis.com/v1/projects/locket-4252a/databases/locket/documents';
 const FIREBASE_STORAGE_BASE = 'https://firebasestorage.googleapis.com/v0/b/locket-img/o';
 
 interface FirebaseLoginPayload {
@@ -144,21 +145,29 @@ interface MomentUidRequestBody {
 interface SendChatMessageBodyData {
   receiver_uid: string;
   msg: string;
-  moment_uid: string;
+  moment_uid: string | null;
   from_memory: boolean;
   intensity: ProtobufInt64Value;
+  client_token: string;
 }
 
 interface SendChatMessageRequestBody {
   data: SendChatMessageBodyData;
 }
 
+interface GenericApiError {
+  message?: string;
+  status?: string;
+}
+
 interface GenericApiResult {
   status?: number;
+  error?: GenericApiError;
 }
 
 interface GenericApiResponse {
   result?: GenericApiResult;
+  error?: GenericApiError;
 }
 
 interface FirestoreTimestampField {
@@ -169,6 +178,33 @@ interface FirestoreIntegerField {
   integerValue?: string;
 }
 
+interface FirestoreArrayValue {
+  values?: FirestoreStringField[];
+}
+
+interface FirestoreArrayField {
+  arrayValue?: FirestoreArrayValue;
+}
+
+interface FirestoreHistoryFields {
+  canonical_uid?: FirestoreStringField;
+  user?: FirestoreStringField;
+  thumbnail_url?: FirestoreStringField;
+  video_url?: FirestoreStringField;
+  caption?: FirestoreStringField;
+  date?: FirestoreTimestampField;
+}
+
+interface FirestoreHistoryDoc {
+  name?: string;
+  fields?: FirestoreHistoryFields;
+}
+
+interface FirestoreHistoryResponse {
+  documents?: FirestoreHistoryDoc[];
+  nextPageToken?: string;
+}
+
 interface FirestoreMessageFields {
   sender?: FirestoreStringField;
   sender_uid?: FirestoreStringField;
@@ -177,6 +213,8 @@ interface FirestoreMessageFields {
   text?: FirestoreStringField;
   moment_uid?: FirestoreStringField;
   moment?: FirestoreStringField;
+  reply_moment?: FirestoreStringField;
+  thumbnail_url?: FirestoreStringField;
   created_at?: FirestoreTimestampField;
   create_time?: FirestoreTimestampField;
   date?: FirestoreIntegerField;
@@ -193,9 +231,11 @@ interface FirestoreMessagesResponse {
 }
 
 interface FirestoreConversationFields {
+  uid?: FirestoreStringField;
   conversation_uid?: FirestoreStringField;
   other_user?: FirestoreStringField;
   user?: FirestoreStringField;
+  members?: FirestoreArrayField;
 }
 
 interface FirestoreConversationDoc {
@@ -445,34 +485,48 @@ export class LocketApiClient {
     return friends;
   }
 
-  public async getLatestMoments(syncToken?: string, filterUserUid?: string): Promise<MomentsFeedResult> {
+  public async getLatestMoments(pageToken?: string, filterUserUid?: string): Promise<MomentsFeedResult> {
     const session = await this.ensureValidToken();
-    const bodyData: GetMomentsBodyData = {
-      excluded_users: [],
-      last_fetch: 1,
-      should_count_missed_moments: true
-    };
-    if (syncToken !== undefined && syncToken.length > 0) {
-      bodyData.sync_token = syncToken;
-    }
-    const body: GetMomentsRequestBody = { data: bodyData };
-    const res = await this.requestJson<GetMomentsResponse>(
-      `${LOCKET_API_BASE}/getLatestMomentV2`,
-      http.RequestMethod.POST,
-      this.buildHeaders(session.idToken),
-      JSON.stringify(body)
+    const tokenQuery = pageToken !== undefined && pageToken.length > 0
+      ? `&pageToken=${encodeURIComponent(pageToken)}`
+      : '';
+    const url = `${FIRESTORE_LOCKET_BASE}/history/${encodeURIComponent(session.localId)}/entries?orderBy=date%20desc&pageSize=30${tokenQuery}`;
+
+    const res = await this.requestJson<FirestoreHistoryResponse>(
+      url,
+      http.RequestMethod.GET,
+      { 'Authorization': `Bearer ${session.idToken}` }
     );
 
-    const rawMoments = res.result?.data ?? [];
+    const docs = res.documents ?? [];
     const moments: MomentItem[] = [];
 
-    for (let i = 0; i < rawMoments.length; i++) {
-      const m = rawMoments[i];
-      const senderUid = m.user ?? '';
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i];
+      const fields = doc.fields;
+      if (fields === undefined) {
+        continue;
+      }
+      const docName = doc.name ?? '';
+      const lastSlash = docName.lastIndexOf('/');
+      const docId = lastSlash >= 0 ? docName.substring(lastSlash + 1) : '';
+      const canonicalUid = fields.canonical_uid?.stringValue ?? docId;
+      const senderUid = fields.user?.stringValue ?? '';
+
       if (filterUserUid !== undefined && filterUserUid.length > 0 && senderUid !== filterUserUid) {
         continue;
       }
-      let senderName = senderUid.substring(0, 8);
+
+      let createdAtSeconds = 0;
+      const tsStr = fields.date?.timestampValue;
+      if (tsStr !== undefined && tsStr.length > 0) {
+        const parsedMs = Date.parse(tsStr);
+        if (!Number.isNaN(parsedMs)) {
+          createdAtSeconds = Math.floor(parsedMs / 1000);
+        }
+      }
+
+      let senderName = senderUid.length > 0 ? senderUid.substring(0, 8) : 'Locket';
       let senderAvatar = '';
       if (senderUid.length > 0) {
         try {
@@ -484,20 +538,21 @@ export class LocketApiClient {
           // Keep fallback sender name
         }
       }
+
       moments.push({
-        canonicalUid: m.canonical_uid ?? '',
+        canonicalUid: canonicalUid,
         userUid: senderUid,
-        thumbnailUrl: m.thumbnail_url ?? '',
-        videoUrl: m.video_url ?? '',
-        caption: m.caption ?? '',
-        createdAtSeconds: m.date?._seconds ?? 0,
+        thumbnailUrl: fields.thumbnail_url?.stringValue ?? '',
+        videoUrl: fields.video_url?.stringValue ?? '',
+        caption: fields.caption?.stringValue ?? '',
+        createdAtSeconds: createdAtSeconds,
         senderName: senderName,
         senderAvatar: senderAvatar
       });
     }
 
     if ((filterUserUid === undefined || filterUserUid.length === 0) &&
-      (syncToken === undefined || syncToken.length === 0) &&
+      (pageToken === undefined || pageToken.length === 0) &&
       moments.length > 0) {
       const latest = moments[0];
       await SessionManager.getInstance().saveLatestWidgetMoment({
@@ -511,8 +566,8 @@ export class LocketApiClient {
 
     return {
       moments: moments,
-      missedMomentsCount: res.result?.missed_moments_count ?? 0,
-      syncToken: res.result?.sync_token ?? ''
+      missedMomentsCount: 0,
+      syncToken: res.nextPageToken ?? ''
     };
   }
 
@@ -563,30 +618,59 @@ export class LocketApiClient {
     );
   }
 
+  private generateUuidV4(): string {
+    const hex = '0123456789abcdef';
+    let uuid = '';
+    for (let i = 0; i < 36; i++) {
+      if (i === 8 || i === 13 || i === 18 || i === 23) {
+        uuid += '-';
+      } else if (i === 14) {
+        uuid += '4';
+      } else if (i === 19) {
+        const r = Math.floor(Math.random() * 16);
+        uuid += hex.charAt((r & 0x3) | 0x8);
+      } else {
+        const r = Math.floor(Math.random() * 16);
+        uuid += hex.charAt(r);
+      }
+    }
+    return uuid;
+  }
+
   public async sendChatMessage(receiverUid: string, text: string, momentUid?: string): Promise<void> {
     const session = await this.ensureValidToken();
     const trimmed = text.trim();
-    if (trimmed.length === 0) {
+    const hasMoment = momentUid !== undefined && momentUid.length > 0;
+    if (trimmed.length === 0 && !hasMoment) {
       return;
     }
+    const msgText = trimmed.length === 0 && hasMoment ? '\u200b' : trimmed;
+    const clientToken = this.generateUuidV4().toUpperCase();
     const body: SendChatMessageRequestBody = {
       data: {
         receiver_uid: receiverUid,
-        msg: trimmed,
-        moment_uid: momentUid ?? '',
+        msg: msgText,
+        moment_uid: hasMoment ? (momentUid as string) : null,
         from_memory: false,
         intensity: {
-          '@type': 'type.googleapis.com/google.protobuf.Int64Value',
-          value: '0'
-        }
+          value: '0',
+          '@type': 'type.googleapis.com/google.protobuf.Int64Value'
+        },
+        client_token: clientToken
       }
     };
-    await this.requestJson<GenericApiResponse>(
+    const res = await this.requestJson<GenericApiResponse>(
       `${LOCKET_API_BASE}/sendChatMessageV2`,
       http.RequestMethod.POST,
       this.buildHeaders(session.idToken),
       JSON.stringify(body)
     );
+    if (res.error !== undefined) {
+      throw new Error(res.error.message ?? 'Gửi tin nhắn thất bại');
+    }
+    if (res.result?.error !== undefined) {
+      throw new Error(res.result.error.message ?? 'Gửi tin nhắn thất bại');
+    }
   }
 
   private parseFirestoreMessages(docs: FirestoreMessageDoc[]): ChatMessage[] {
@@ -603,7 +687,8 @@ export class LocketApiClient {
 
       const senderUid = fields.sender?.stringValue ?? fields.sender_uid?.stringValue ?? '';
       const text = fields.body?.stringValue ?? fields.msg?.stringValue ?? fields.text?.stringValue ?? '';
-      const momentUid = fields.moment_uid?.stringValue ?? fields.moment?.stringValue ?? '';
+      const momentUid = fields.reply_moment?.stringValue ?? fields.moment_uid?.stringValue ?? fields.moment?.stringValue ?? '';
+      const thumbnailUrl = fields.thumbnail_url?.stringValue ?? '';
 
       let createdAtMs = 0;
       const tsStr = fields.created_at?.timestampValue ?? fields.create_time?.timestampValue ?? doc.createTime;
@@ -619,13 +704,14 @@ export class LocketApiClient {
         }
       }
 
-      if (text.length > 0) {
+      if (text.length > 0 || momentUid.length > 0 || thumbnailUrl.length > 0) {
         messages.push({
           id: id,
           senderUid: senderUid,
           text: text,
           momentUid: momentUid,
-          createdAtMs: createdAtMs
+          createdAtMs: createdAtMs,
+          thumbnailUrl: thumbnailUrl
         });
       }
     }
@@ -635,55 +721,50 @@ export class LocketApiClient {
 
   public async getMessagesWithUser(otherUid: string): Promise<ChatMessage[]> {
     const session = await this.ensureValidToken();
-    const pair: string[] = [session.localId, otherUid];
-    pair.sort();
-    let conversationId = `${pair[0]}_${pair[1]}`;
+    const convUrl = `${FIRESTORE_BASE}/users/${encodeURIComponent(session.localId)}/conversations?pageSize=50`;
+    const convRes = await this.requestJson<FirestoreConversationsResponse>(
+      convUrl,
+      http.RequestMethod.GET,
+      { 'Authorization': `Bearer ${session.idToken}` }
+    );
 
-    // Try deterministic conversation ID first
-    try {
-      const url = `${FIRESTORE_BASE}/conversations/${encodeURIComponent(conversationId)}/messages?pageSize=50`;
-      const res = await this.requestJson<FirestoreMessagesResponse>(
-        url,
-        http.RequestMethod.GET,
-        { 'Authorization': `Bearer ${session.idToken}` }
-      );
-      const docs = res.documents ?? [];
-      if (docs.length > 0) {
-        return this.parseFirestoreMessages(docs);
+    const convDocs = convRes.documents ?? [];
+    let cid = '';
+    for (let i = 0; i < convDocs.length; i++) {
+      const convDoc = convDocs[i];
+      const cFields = convDoc.fields;
+      if (cFields === undefined) {
+        continue;
       }
-    } catch (_err) {
-      // Fallback to checking user's conversations collection
-    }
-
-    try {
-      const convUrl = `${FIRESTORE_BASE}/users/${session.localId}/conversations?pageSize=100`;
-      const convRes = await this.requestJson<FirestoreConversationsResponse>(
-        convUrl,
-        http.RequestMethod.GET,
-        { 'Authorization': `Bearer ${session.idToken}` }
-      );
-      const convDocs = convRes.documents ?? [];
-      for (let i = 0; i < convDocs.length; i++) {
-        const cFields = convDocs[i].fields;
-        const targetUid = cFields?.other_user?.stringValue ?? cFields?.user?.stringValue ?? '';
-        if (targetUid === otherUid) {
-          const cid = cFields?.conversation_uid?.stringValue ?? '';
-          if (cid.length > 0) {
-            conversationId = cid;
+      let matched = cFields.uid?.stringValue === otherUid;
+      if (!matched) {
+        const memberValues = cFields.members?.arrayValue?.values ?? [];
+        for (let j = 0; j < memberValues.length; j++) {
+          if (memberValues[j].stringValue === otherUid) {
+            matched = true;
             break;
           }
         }
       }
-      const msgUrl = `${FIRESTORE_BASE}/conversations/${encodeURIComponent(conversationId)}/messages?pageSize=50`;
-      const msgRes = await this.requestJson<FirestoreMessagesResponse>(
-        msgUrl,
-        http.RequestMethod.GET,
-        { 'Authorization': `Bearer ${session.idToken}` }
-      );
-      return this.parseFirestoreMessages(msgRes.documents ?? []);
-    } catch (_err) {
+      if (matched) {
+        const docName = convDoc.name ?? '';
+        const lastSlash = docName.lastIndexOf('/');
+        cid = lastSlash >= 0 ? docName.substring(lastSlash + 1) : docName;
+        break;
+      }
+    }
+
+    if (cid.length === 0) {
       return [];
     }
+
+    const msgUrl = `${FIRESTORE_BASE}/conversations/${encodeURIComponent(cid)}/messages?orderBy=created_at%20asc&pageSize=50`;
+    const msgRes = await this.requestJson<FirestoreMessagesResponse>(
+      msgUrl,
+      http.RequestMethod.GET,
+      { 'Authorization': `Bearer ${session.idToken}` }
+    );
+    return this.parseFirestoreMessages(msgRes.documents ?? []);
   }
 
   public async uploadAndPostPhotoMoment(imageBytes: ArrayBuffer, options: UploadMomentOptions): Promise<void> {
