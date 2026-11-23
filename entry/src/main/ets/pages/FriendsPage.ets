@@ -1,7 +1,9 @@
+import { common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
 import { FriendItem, getDisplayName, UserProfile } from '../models/LocketModels';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { SessionManager } from '../services/SessionManager';
+import { ShareService } from '../services/ShareService';
 
 @Entry
 @Component
@@ -16,17 +18,47 @@ struct FriendsPage {
   @State isSendingRequest: boolean = false;
   @State showTipCard: boolean = true;
   @State myUsername: string = 'locket';
+  @State myDisplayName: string = '';
+  @State isKnockShareActive: boolean = false;
+  private isPageVisible: boolean = false;
+  private isUsernameLoaded: boolean = false;
 
   aboutToAppear(): void {
     this.loadFriends();
     this.loadMyUsername();
   }
 
+  onPageShow(): void {
+    this.isPageVisible = true;
+    if (this.isUsernameLoaded) {
+      this.activateKnockShare(false);
+    }
+  }
+
+  onPageHide(): void {
+    this.isPageVisible = false;
+    ShareService.disableKnockShare();
+    this.isKnockShareActive = false;
+  }
+
+  aboutToDisappear(): void {
+    this.isPageVisible = false;
+    ShareService.disableKnockShare();
+    this.isKnockShareActive = false;
+  }
+
   private async loadMyUsername(): Promise<void> {
     try {
       const session = SessionManager.getInstance().getSession();
       if (session !== null) {
+        if (session.displayName.length > 0) {
+          this.myDisplayName = session.displayName;
+        }
         const me = await LocketApiClient.getInstance().fetchUser(session.localId);
+        const resolvedName = getDisplayName(me);
+        if (resolvedName.length > 0) {
+          this.myDisplayName = resolvedName;
+        }
         if (me.username.length > 0) {
           this.myUsername = me.username;
         } else if (session.email.includes('@')) {
@@ -35,7 +67,57 @@ struct FriendsPage {
       }
     } catch (_err) {
       // Keep fallback username
+    } finally {
+      this.isUsernameLoaded = true;
+      if (this.isPageVisible) {
+        this.activateKnockShare(false);
+      }
     }
+  }
+
+  private async handleCopyInviteLink(): Promise<void> {
+    try {
+      await ShareService.copyInviteLink(this.myUsername);
+      promptAction.showToast({ message: 'Đã sao chép link mời!' });
+    } catch (_err) {
+      promptAction.showToast({ message: 'Không thể sao chép link mời' });
+    }
+  }
+
+  private async handleSystemShare(): Promise<void> {
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      await ShareService.shareViaSystemSheet(context, this.myUsername, this.myDisplayName);
+    } catch (_err) {
+      try {
+        await ShareService.copyInviteLink(this.myUsername);
+        promptAction.showToast({ message: 'Đã sao chép link mời!' });
+      } catch (_copyErr) {
+        promptAction.showToast({ message: 'Không thể mở bảng chia sẻ hệ thống' });
+      }
+    }
+  }
+
+  private activateKnockShare(showFeedback: boolean): void {
+    const enabled = ShareService.enableKnockShare(this.myUsername, this.myDisplayName);
+    this.isKnockShareActive = enabled;
+    if (showFeedback) {
+      if (enabled) {
+        promptAction.showToast({ message: 'Đưa đỉnh 2 máy HarmonyOS lại gần nhau để chia sẻ link' });
+      } else {
+        promptAction.showToast({ message: 'Thiết bị chưa hỗ trợ Chạm máy (NearLink)' });
+      }
+    }
+  }
+
+  private handleToggleKnockShare(): void {
+    if (this.isKnockShareActive) {
+      ShareService.disableKnockShare();
+      this.isKnockShareActive = false;
+      promptAction.showToast({ message: 'Đã tắt Chạm máy (NearLink)' });
+      return;
+    }
+    this.activateKnockShare(true);
   }
 
   private async loadFriends(): Promise<void> {
@@ -104,8 +186,15 @@ struct FriendsPage {
   }
 
   @Builder
-  private buildSocialIconButton(label: string, iconRes: Resource, bgColor: string, iconColor: string) {
-    Column({ space: 6 }) {
+  private buildShareActionButton(
+    label: string,
+    iconRes: Resource,
+    bgColor: string,
+    iconColor: string,
+    isHighlighted: boolean,
+    onTap: () => void
+  ) {
+    Column({ space: 8 }) {
       Column() {
         Image(iconRes)
           .width(24)
@@ -116,38 +205,20 @@ struct FriendsPage {
       .height(56)
       .borderRadius(28)
       .backgroundColor(bgColor)
+      .border(isHighlighted ? { width: 1.5, color: '#FFB800' } : { width: 1, color: '#3A3A3C' })
+      .shadow(isHighlighted ? { radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 } : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
       .justifyContent(FlexAlign.Center)
 
       Text(label)
         .fontSize(12)
-        .fontColor('#FFFFFF')
+        .fontWeight(isHighlighted ? FontWeight.Bold : FontWeight.Medium)
+        .fontColor(isHighlighted ? '#FFB800' : '#FFFFFF')
+        .textAlign(TextAlign.Center)
     }
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Center)
     .onClick(() => {
-      promptAction.showToast({ message: `Chia sẻ liên kết locket.cam/${this.myUsername} qua ${label}` });
-    })
-  }
-
-  @Builder
-  private buildSocialTextButton(label: string, badgeText: string, bgColor: string, textColor: string) {
-    Column({ space: 6 }) {
-      Column() {
-        Text(badgeText)
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(textColor)
-      }
-      .width(56)
-      .height(56)
-      .borderRadius(28)
-      .backgroundColor(bgColor)
-      .justifyContent(FlexAlign.Center)
-
-      Text(label)
-        .fontSize(12)
-        .fontColor('#FFFFFF')
-    }
-    .onClick(() => {
-      promptAction.showToast({ message: `Chia sẻ liên kết locket.cam/${this.myUsername} qua ${label}` });
+      onTap();
     })
   }
 
@@ -304,25 +375,69 @@ struct FriendsPage {
 
         Scroll() {
           Column({ space: 16 }) {
-            // Section: Tìm bạn bè từ các ứng dụng khác
+            // Section: HarmonyOS Native Share Bar
             Column({ space: 12 }) {
-              Text('Tìm bạn bè từ các ứng dụng khác')
+              Text('Chia sẻ & Kết nối nhanh')
                 .fontSize(14)
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#8E8E93')
                 .width('100%')
 
               Row() {
-                this.buildSocialIconButton('Messenger', $r('app.media.ic_chat'), '#0084FF', '#FFFFFF')
-                Blank()
-                this.buildSocialTextButton('Zalo', 'Zalo', '#FFFFFF', '#0068FF')
-                Blank()
-                this.buildSocialIconButton('Insta', $r('app.media.ic_gallery'), '#E1306C', '#FFFFFF')
-                Blank()
-                this.buildSocialIconButton('Khác', $r('app.media.ic_share'), '#3A3A3C', '#FFFFFF')
+                this.buildShareActionButton(
+                  'Sao chép link',
+                  $r('app.media.ic_copy'),
+                  '#2C2C2E',
+                  '#FFFFFF',
+                  false,
+                  () => {
+                    this.handleCopyInviteLink();
+                  }
+                )
+
+                this.buildShareActionButton(
+                  'Chia sẻ app',
+                  $r('app.media.ic_share'),
+                  '#FFB800',
+                  '#000000',
+                  true,
+                  () => {
+                    this.handleSystemShare();
+                  }
+                )
+
+                this.buildShareActionButton(
+                  'Chạm máy (NearLink)',
+                  $r('app.media.ic_nearlink'),
+                  this.isKnockShareActive ? '#2A2210' : '#2C2C2E',
+                  this.isKnockShareActive ? '#FFB800' : '#FFFFFF',
+                  this.isKnockShareActive,
+                  () => {
+                    this.handleToggleKnockShare();
+                  }
+                )
               }
               .width('100%')
-              .padding({ left: 8, right: 8 })
+              .padding({ left: 4, right: 4 })
+
+              if (this.isKnockShareActive) {
+                Row({ space: 8 }) {
+                  Image($r('app.media.ic_nearlink'))
+                    .width(16)
+                    .height(16)
+                    .fillColor('#FFB800')
+
+                  Text('Đưa đỉnh 2 máy HarmonyOS lại gần nhau để chia sẻ link')
+                    .fontSize(12)
+                    .fontColor('#FFB800')
+                    .layoutWeight(1)
+                }
+                .width('100%')
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor('#2A2210')
+                .borderRadius(12)
+                .border({ width: 1, color: '#5A4614' })
+              }
             }
             .width('100%')
 

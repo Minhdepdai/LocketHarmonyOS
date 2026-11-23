@@ -1,7 +1,9 @@
+import { common } from '@kit.AbilityKit';
 import { promptAction, router } from '@kit.ArkUI';
 import { getDisplayName, UserProfile } from '../models/LocketModels';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { SessionManager } from '../services/SessionManager';
+import { ShareService } from '../services/ShareService';
 
 @Entry
 @Component
@@ -64,6 +66,22 @@ struct ProfilePage {
     await SessionManager.getInstance().clearSession();
     router.clear();
     router.replaceUrl({ url: 'pages/LoginPage' });
+  }
+
+  private async handleShareInvite(): Promise<void> {
+    const username = this.getProfileUsername();
+    const displayName = this.getProfileName();
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      await ShareService.shareViaSystemSheet(context, username, displayName);
+    } catch (_err) {
+      try {
+        const url = await ShareService.copyInviteLink(username);
+        promptAction.showToast({ message: `Đã sao chép ${url}` });
+      } catch (_copyErr) {
+        promptAction.showToast({ message: 'Không thể chia sẻ liên kết lúc này' });
+      }
+    }
   }
 
   @Builder
@@ -293,7 +311,7 @@ struct ProfilePage {
           .borderRadius(18)
           .border({ width: 1, color: '#2E2E30' })
           .onClick(() => {
-            promptAction.showToast({ message: `Đã sao chép locket.cam/${this.getProfileUsername()}` });
+            this.handleShareInvite();
           })
 
           // Section 1: Thiết lập Tiện ích
