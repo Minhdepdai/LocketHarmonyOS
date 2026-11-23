@@ -158,7 +158,7 @@ struct ProfilePage {
 
             Text('Chỉnh ảnh')
               .fontSize(14)
-              .fontWeight(FontWeight.SemiBold)
+              .fontWeight(FontWeight.Medium)
               .fontColor('#FFB800')
               .margin({ top: 6 })
               .onClick(() => {
@@ -282,7 +282,7 @@ struct ProfilePage {
           // Section 1: Thiết lập Tiện ích
           Text('Thiết lập Tiện ích')
             .fontSize(13)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#8E8E93')
             .width('100%')
             .padding({ left: 8, top: 8 })
@@ -320,7 +320,7 @@ struct ProfilePage {
           // Section 2: Tổng quát
           Text('Tổng quát')
             .fontSize(13)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#8E8E93')
             .width('100%')
             .padding({ left: 8, top: 8 })
@@ -346,7 +346,7 @@ struct ProfilePage {
           // Section 3: Riêng tư & bảo mật
           Text('Riêng tư & bảo mật')
             .fontSize(13)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#8E8E93')
             .width('100%')
             .padding({ left: 8, top: 8 })
@@ -368,7 +368,7 @@ struct ProfilePage {
           // Section 4: Vùng nguy hiểm
           Text('Vùng nguy hiểm')
             .fontSize(13)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#8E8E93')
             .width('100%')
             .padding({ left: 8, top: 8 })

@@ -210,7 +210,7 @@ struct CameraPage {
               .layoutWeight(1)
               .height(48)
               .fontSize(15)
-              .fontWeight(FontWeight.SemiBold)
+              .fontWeight(FontWeight.Medium)
               .fontColor('#FFFFFF')
               .backgroundColor('#1C1C1E')
               .borderRadius(24)
@@ -244,7 +244,7 @@ struct CameraPage {
           Row() {
             Text(this.sendToAll ? 'Gửi tới: Tất cả bạn bè' : `Gửi tới: ${this.selectedFriendUids.length} bạn đã chọn`)
               .fontSize(14)
-              .fontWeight(FontWeight.SemiBold)
+              .fontWeight(FontWeight.Medium)
               .fontColor('#FFFFFF')
 
             Blank()
@@ -279,7 +279,7 @@ struct CameraPage {
                     Blank()
                     Text(this.selectedFriendUids.includes(friend.uid) ? '✓ Đã chọn' : 'Chọn')
                       .fontSize(13)
-                      .fontWeight(FontWeight.SemiBold)
+                      .fontWeight(FontWeight.Medium)
                       .fontColor(this.selectedFriendUids.includes(friend.uid) ? '#FFB800' : '#8E8E93')
                   }
                   .width('100%')

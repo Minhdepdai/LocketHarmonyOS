@@ -231,12 +231,12 @@ struct HomePage {
             .fontSize(15)
           Text(`${this.friendsCount} Bạn bè`)
             .fontSize(15)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#FFFFFF')
         } else {
           Text(this.filterUid.length > 0 ? `${this.filterLabel} ✕` : `${this.filterLabel} ⌄`)
             .fontSize(15)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#FFFFFF')
             .maxLines(1)
         }
@@ -399,7 +399,7 @@ struct HomePage {
 
         Text('Lịch sử ⌄')
           .fontSize(15)
-          .fontWeight(FontWeight.SemiBold)
+          .fontWeight(FontWeight.Medium)
           .fontColor('#FFFFFF')
       }
       .padding({ left: 16, right: 16, top: 10, bottom: 10 })
@@ -504,7 +504,7 @@ struct HomePage {
         Column() {
           Text('Chưa có khoảnh khắc nào')
             .fontSize(16)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#FFFFFF')
             .margin({ bottom: 14 })
           Button('Làm mới')

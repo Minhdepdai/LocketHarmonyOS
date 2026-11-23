@@ -278,7 +278,7 @@ struct FriendsPage {
             Column({ space: 12 }) {
               Text('Tìm bạn bè từ các ứng dụng khác')
                 .fontSize(14)
-                .fontWeight(FontWeight.SemiBold)
+                .fontWeight(FontWeight.Medium)
                 .fontColor('#8E8E93')
                 .width('100%')
 
@@ -336,7 +336,7 @@ struct FriendsPage {
             // Section: Bạn bè của bạn
             Text('Bạn bè của bạn')
               .fontSize(14)
-              .fontWeight(FontWeight.SemiBold)
+              .fontWeight(FontWeight.Medium)
               .fontColor('#8E8E93')
               .width('100%')
 

@@ -31,7 +31,7 @@ struct LocketWidgetCard {
           if (this.senderName.length > 0) {
             Text(this.senderName)
               .fontSize(11)
-              .fontWeight(FontWeight.SemiBold)
+              .fontWeight(FontWeight.Medium)
               .fontColor('#FFB800')
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })

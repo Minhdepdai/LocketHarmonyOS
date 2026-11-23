@@ -168,7 +168,7 @@ struct ChatPage {
         Column() {
           Text('Chưa có tin nhắn nào')
             .fontSize(16)
-            .fontWeight(FontWeight.SemiBold)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#FFFFFF')
           Text('Hãy gửi lời chào tới bạn bè của bạn!')
             .fontSize(13)
