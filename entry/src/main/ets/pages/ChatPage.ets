@@ -94,7 +94,7 @@ struct ChatPage {
     if (this.messages.length > 0) {
       setTimeout(() => {
         try {
-          this.listScroller.scrollToIndex(this.messages.length - 1, animated, ScrollAlign.END);
+          this.listScroller.scrollToIndex(this.messages.length + 1, animated, ScrollAlign.END);
         } catch (_err) {
           this.listScroller.scrollEdge(Edge.Bottom);
         }
@@ -240,6 +240,12 @@ struct ChatPage {
         .justifyContent(FlexAlign.Center)
       } else {
         List({ space: 10, scroller: this.listScroller }) {
+          ListItem() {
+            Column()
+              .width('100%')
+              .height(this.safeTopVp + 58)
+          }
+
           ForEach(this.messages, (msg: ChatMessage) => {
             ListItem() {
               Column({ space: 8 }) {
@@ -334,15 +340,16 @@ struct ChatPage {
               .width('100%')
             }
           }, (msg: ChatMessage) => msg.id)
+
+          ListItem() {
+            Column()
+              .width('100%')
+              .height(this.safeBottomVp + 78)
+          }
         }
         .width('100%')
         .height('100%')
-        .padding({
-          top: this.safeTopVp + 66,
-          bottom: this.safeBottomVp + 78,
-          left: 12,
-          right: 12
-        })
+        .padding({ left: 12, right: 12 })
         .scrollBar(BarState.Off)
       }
 

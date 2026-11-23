@@ -697,4 +697,11 @@ struct FriendsPage {
     .padding({ top: this.safeTopVp })
     .backgroundColor('#000000')
   }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseOut })
+      .slide(SlideEffect.Bottom)
+    PageTransitionExit({ duration: 240, curve: Curve.EaseIn })
+      .slide(SlideEffect.Bottom)
+  }
 }

@@ -145,6 +145,16 @@ interface MomentUidRequestBody {
   data: MomentUidBodyData;
 }
 
+interface DeleteMomentBodyData {
+  moment_uid: string;
+  owner_uid: string;
+  delete_globally: boolean;
+}
+
+interface DeleteMomentRequestBody {
+  data: DeleteMomentBodyData;
+}
+
 interface SendChatMessageBodyData {
   receiver_uid: string;
   msg: string;
@@ -166,6 +176,7 @@ interface GenericApiError {
 interface GenericApiResult {
   status?: number;
   error?: GenericApiError;
+  errors?: string[];
 }
 
 interface GenericApiResponse {
@@ -534,76 +545,85 @@ export class LocketApiClient {
 
   public async getLatestMoments(pageToken?: string, filterUserUid?: string): Promise<MomentsFeedResult> {
     const session = await this.ensureValidToken();
-    const tokenQuery = pageToken !== undefined && pageToken.length > 0
-      ? `&pageToken=${encodeURIComponent(pageToken)}`
-      : '';
-    const url = `${FIRESTORE_LOCKET_BASE}/history/${encodeURIComponent(session.localId)}/entries?orderBy=date%20desc&pageSize=30${tokenQuery}`;
-
-    const res = await this.requestJson<FirestoreHistoryResponse>(
-      url,
-      http.RequestMethod.GET,
-      { 'Authorization': `Bearer ${session.idToken}` }
-    );
-
-    const docs = res.documents ?? [];
     const moments: MomentItem[] = [];
+    let currentToken = pageToken ?? '';
+    const isFiltering = filterUserUid !== undefined && filterUserUid.length > 0;
+    const maxPages = isFiltering ? 4 : 1;
+    let pageCount = 0;
 
-    for (let i = 0; i < docs.length; i++) {
-      const doc = docs[i];
-      const fields = doc.fields;
-      if (fields === undefined) {
-        continue;
-      }
-      const docName = doc.name ?? '';
-      const lastSlash = docName.lastIndexOf('/');
-      const docId = lastSlash >= 0 ? docName.substring(lastSlash + 1) : '';
-      const canonicalUid = fields.canonical_uid?.stringValue ?? docId;
-      const senderUid = fields.user?.stringValue ?? '';
+    do {
+      const tokenQuery = currentToken.length > 0
+        ? `&pageToken=${encodeURIComponent(currentToken)}`
+        : '';
+      const url = `${FIRESTORE_LOCKET_BASE}/history/${encodeURIComponent(session.localId)}/entries?orderBy=date%20desc&pageSize=50${tokenQuery}`;
 
-      if (filterUserUid !== undefined && filterUserUid.length > 0 && senderUid !== filterUserUid) {
-        continue;
-      }
+      const res = await this.requestJson<FirestoreHistoryResponse>(
+        url,
+        http.RequestMethod.GET,
+        { 'Authorization': `Bearer ${session.idToken}` }
+      );
 
-      let createdAtSeconds = 0;
-      const tsStr = fields.date?.timestampValue;
-      if (tsStr !== undefined && tsStr.length > 0) {
-        const parsedMs = Date.parse(tsStr);
-        if (!Number.isNaN(parsedMs)) {
-          createdAtSeconds = Math.floor(parsedMs / 1000);
+      const docs = res.documents ?? [];
+      for (let i = 0; i < docs.length; i++) {
+        const doc = docs[i];
+        const fields = doc.fields;
+        if (fields === undefined) {
+          continue;
         }
-      }
+        const docName = doc.name ?? '';
+        const lastSlash = docName.lastIndexOf('/');
+        const docId = lastSlash >= 0 ? docName.substring(lastSlash + 1) : '';
+        const canonicalUid = fields.canonical_uid?.stringValue ?? docId;
+        const senderUid = fields.user?.stringValue ?? '';
 
-      let senderName = senderUid.length > 0 ? senderUid.substring(0, 8) : 'Locket';
-      let senderAvatar = '';
-      if (senderUid.length > 0) {
-        try {
-          const sender = await this.fetchUser(senderUid);
-          const full = `${sender.firstName} ${sender.lastName}`.trim();
-          senderName = full.length > 0 ? full : (sender.username.length > 0 ? sender.username : senderName);
-          senderAvatar = sender.profilePictureUrl;
-        } catch (_err) {
-          // Keep fallback sender name
+        if (isFiltering && senderUid !== filterUserUid) {
+          continue;
         }
+
+        let createdAtSeconds = 0;
+        const tsStr = fields.date?.timestampValue;
+        if (tsStr !== undefined && tsStr.length > 0) {
+          const parsedMs = Date.parse(tsStr);
+          if (!Number.isNaN(parsedMs)) {
+            createdAtSeconds = Math.floor(parsedMs / 1000);
+          }
+        }
+
+        let senderName = senderUid.length > 0 ? senderUid.substring(0, 8) : 'Locket';
+        let senderAvatar = '';
+        if (senderUid.length > 0) {
+          try {
+            const sender = await this.fetchUser(senderUid);
+            const full = `${sender.firstName} ${sender.lastName}`.trim();
+            senderName = full.length > 0 ? full : (sender.username.length > 0 ? sender.username : senderName);
+            senderAvatar = sender.profilePictureUrl;
+          } catch (_err) {
+            // Keep fallback sender name
+          }
+        }
+
+        const thumbUrl = fields.thumbnail_url?.stringValue ?? '';
+        if (canonicalUid.length > 0 && thumbUrl.length > 0) {
+          this.momentThumbnailCache.set(canonicalUid, thumbUrl);
+        }
+
+        moments.push({
+          canonicalUid: canonicalUid,
+          userUid: senderUid,
+          thumbnailUrl: thumbUrl,
+          videoUrl: fields.video_url?.stringValue ?? '',
+          caption: fields.caption?.stringValue ?? '',
+          createdAtSeconds: createdAtSeconds,
+          senderName: senderName,
+          senderAvatar: senderAvatar
+        });
       }
 
-      const thumbUrl = fields.thumbnail_url?.stringValue ?? '';
-      if (canonicalUid.length > 0 && thumbUrl.length > 0) {
-        this.momentThumbnailCache.set(canonicalUid, thumbUrl);
-      }
+      currentToken = res.nextPageToken ?? '';
+      pageCount++;
+    } while (isFiltering && moments.length < 15 && currentToken.length > 0 && pageCount < maxPages);
 
-      moments.push({
-        canonicalUid: canonicalUid,
-        userUid: senderUid,
-        thumbnailUrl: thumbUrl,
-        videoUrl: fields.video_url?.stringValue ?? '',
-        caption: fields.caption?.stringValue ?? '',
-        createdAtSeconds: createdAtSeconds,
-        senderName: senderName,
-        senderAvatar: senderAvatar
-      });
-    }
-
-    if ((filterUserUid === undefined || filterUserUid.length === 0) &&
+    if (!isFiltering &&
       (pageToken === undefined || pageToken.length === 0) &&
       moments.length > 0) {
       const latest = moments[0];
@@ -619,7 +639,7 @@ export class LocketApiClient {
     return {
       moments: moments,
       missedMomentsCount: 0,
-      syncToken: res.nextPageToken ?? ''
+      syncToken: currentToken
     };
   }
 
@@ -646,15 +666,28 @@ export class LocketApiClient {
 
   public async deleteMoment(momentUid: string): Promise<void> {
     const session = await this.ensureValidToken();
-    const body: MomentUidRequestBody = {
-      data: { moment_uid: momentUid }
+    const body: DeleteMomentRequestBody = {
+      data: {
+        moment_uid: momentUid,
+        owner_uid: session.localId,
+        delete_globally: true
+      }
     };
-    await this.requestJson<GenericApiResponse>(
+    const res = await this.requestJson<GenericApiResponse>(
       `${LOCKET_API_BASE}/deleteMomentV2`,
       http.RequestMethod.POST,
       this.buildHeaders(session.idToken),
       JSON.stringify(body)
     );
+    if (res.error !== undefined) {
+      throw new Error(res.error.message ?? 'Không thể xóa khoảnh khắc');
+    }
+    if (res.result?.error !== undefined) {
+      throw new Error(res.result.error.message ?? 'Không thể xóa khoảnh khắc');
+    }
+    if (res.result?.errors !== undefined && res.result.errors.length > 0) {
+      throw new Error(res.result.errors[0]);
+    }
   }
 
   public async markMomentAsViewed(momentUid: string): Promise<void> {

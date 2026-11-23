@@ -358,6 +358,7 @@ struct HomePage {
   }
 
   private async pickFromGallery(): Promise<void> {
+    await this.stopLiveCamera();
     try {
       const options = new photoAccessHelper.PhotoSelectOptions();
       options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
@@ -365,15 +366,18 @@ struct HomePage {
       const picker = new photoAccessHelper.PhotoViewPicker();
       const result = await picker.select(options);
       if (result.photoUris.length > 0) {
-        await this.stopLiveCamera();
         router.pushUrl({
           url: 'pages/CameraPage',
           params: { capturedPhotoPath: result.photoUris[0] }
         });
+        return;
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không thể mở thư viện ảnh';
       promptAction.showToast({ message: msg });
+    }
+    if (this.viewMode === 'camera' && this.cameraSurfaceId.length > 0) {
+      this.startLiveCamera();
     }
   }
 
@@ -1118,7 +1122,7 @@ struct HomePage {
             if (index >= 0 && index < this.moments.length) {
               this.markAsViewedSilently(this.moments[index].canonicalUid);
             }
-            if (index >= this.moments.length - 1 && this.syncToken.length > 0 && !this.isLoadingMore) {
+            if (index >= this.moments.length - 5 && this.syncToken.length > 0 && !this.isLoadingMore) {
               this.loadMoreMoments();
             }
           })
@@ -1289,6 +1293,14 @@ struct HomePage {
         .justifyContent(FlexAlign.Center)
       } else {
         Grid() {
+          GridItem() {
+            Column()
+              .width('100%')
+              .height(this.safeTopVp + 62)
+          }
+          .columnStart(0)
+          .columnEnd(2)
+
           ForEach(this.moments, (item: MomentItem, idx: number) => {
             GridItem() {
               Image(item.thumbnailUrl)
@@ -1303,14 +1315,36 @@ struct HomePage {
                 })
             }
           }, (item: MomentItem) => item.canonicalUid)
+
+          GridItem() {
+            Column() {
+              if (this.isLoadingMore) {
+                LoadingProgress()
+                  .width(28)
+                  .height(28)
+                  .color('#FFB800')
+                  .margin({ top: 12 })
+              }
+            }
+            .width('100%')
+            .height(this.safeBottomVp + 96)
+            .alignItems(HorizontalAlign.Center)
+          }
+          .columnStart(0)
+          .columnEnd(2)
         }
         .columnsTemplate('1fr 1fr 1fr')
         .columnsGap(4)
         .rowsGap(4)
         .width('100%')
         .height('100%')
-        .padding({ left: 8, right: 8, top: this.safeTopVp + 68, bottom: this.safeBottomVp + 96 })
+        .padding({ left: 8, right: 8 })
         .scrollBar(BarState.Off)
+        .onReachEnd(() => {
+          if (this.syncToken.length > 0 && !this.isLoadingMore) {
+            this.loadMoreMoments();
+          }
+        })
       }
 
       // Bottom-up Smooth 4-stop Gradient Scrim behind stationary bottom pill (no full-width backdropBlur)
@@ -1330,28 +1364,8 @@ struct HomePage {
 
   @Builder
   private buildMessagesMode() {
-    Stack({ alignContent: Alignment.Bottom }) {
+    Stack({ alignContent: Alignment.Top }) {
       Column() {
-        // Dedicated Messages Header: centered bold "Trò chuyện" + right circular user avatar
-        Row() {
-          Column()
-            .width(48)
-            .height(48)
-
-          Blank()
-
-          Text('Trò chuyện')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
-
-          Blank()
-
-          this.buildProfileAvatarButton()
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: this.safeTopVp + 8, bottom: 10 })
-
         if (this.isLoadingMessages && this.conversations.length === 0 && this.allFriends.length === 0) {
           Column() {
             LoadingProgress()
@@ -1369,6 +1383,9 @@ struct HomePage {
         } else {
           Scroll() {
             Column({ space: 6 }) {
+              Column()
+                .width('100%')
+                .height(this.safeTopVp + 66)
               // Active conversations
               ForEach(this.conversations, (conv: ConversationSummary) => {
                 Row({ space: 14 }) {
@@ -1516,6 +1533,37 @@ struct HomePage {
       }
       .width('100%')
       .height('100%')
+
+      // Floating Messages Header (no black header bar)
+      Row() {
+        Column()
+          .width(48)
+          .height(48)
+          .hitTestBehavior(HitTestMode.None)
+
+        Blank()
+
+        Row() {
+          Text('Trò chuyện')
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+        }
+        .height(44)
+        .padding({ left: 20, right: 20 })
+        .borderRadius(22)
+        .backgroundColor('#CC1A1A1C')
+        .backdropBlur(16)
+        .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 16, color: '#66000000', offsetX: 0, offsetY: 4 })
+
+        Blank()
+
+        this.buildProfileAvatarButton()
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: this.safeTopVp + 8, bottom: 8 })
+      .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .layoutWeight(1)
@@ -1743,27 +1791,34 @@ struct HomePage {
 
   @Builder
   private buildFriendFilterSheet() {
-    Stack({ alignContent: Alignment.Top }) {
+    Stack({ alignContent: Alignment.Bottom }) {
       // Semi-transparent backdrop tapping to dismiss
       Column()
         .width('100%')
         .height('100%')
         .backgroundColor('#99000000')
         .onClick(() => {
-          animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+          animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
             this.showFriendFilter = false;
           });
         })
 
-      // Centered floating dark dropdown card right below the top bar
+      // Bottom-up rounded sheet with drag handle
       Column() {
+        Column()
+          .width(40)
+          .height(5)
+          .borderRadius(3)
+          .backgroundColor('#48484A')
+          .margin({ top: 10, bottom: 6 })
+
         Text('Lọc ảnh theo bạn bè')
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#8E8E93')
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF')
           .width('100%')
           .textAlign(TextAlign.Center)
-          .padding({ top: 14, bottom: 12 })
+          .padding({ top: 6, bottom: 12 })
 
         Divider().color('#2E2E30')
 
@@ -1777,9 +1832,9 @@ struct HomePage {
                   .height(18)
                   .fillColor(this.filterUid === '' ? '#000000' : '#FFFFFF')
               }
-              .width(36)
-              .height(36)
-              .borderRadius(18)
+              .width(38)
+              .height(38)
+              .borderRadius(19)
               .backgroundColor(this.filterUid === '' ? '#FFB800' : '#2C2C2E')
               .justifyContent(FlexAlign.Center)
 
@@ -1798,7 +1853,7 @@ struct HomePage {
             }
             .width('100%')
             .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-            .borderRadius(14)
+            .borderRadius(16)
             .backgroundColor(this.filterUid === '' ? '#262628' : Color.Transparent)
             .onClick(() => {
               this.selectFriendFilter('', 'Tất cả bạn bè');
@@ -1809,9 +1864,9 @@ struct HomePage {
               Row({ space: 12 }) {
                 if (friend.profilePictureUrl.length > 0) {
                   Image(friend.profilePictureUrl)
-                    .width(36)
-                    .height(36)
-                    .borderRadius(18)
+                    .width(38)
+                    .height(38)
+                    .borderRadius(19)
                     .objectFit(ImageFit.Cover)
                     .border({
                       width: this.filterUid === friend.uid ? 2 : 1,
@@ -1824,9 +1879,9 @@ struct HomePage {
                       .fontWeight(FontWeight.Bold)
                       .fontColor('#FFFFFF')
                   }
-                  .width(36)
-                  .height(36)
-                  .borderRadius(18)
+                  .width(38)
+                  .height(38)
+                  .borderRadius(19)
                   .backgroundColor('#2C2C2E')
                   .border({
                     width: this.filterUid === friend.uid ? 2 : 1,
@@ -1853,7 +1908,7 @@ struct HomePage {
               }
               .width('100%')
               .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-              .borderRadius(14)
+              .borderRadius(16)
               .backgroundColor(this.filterUid === friend.uid ? '#262628' : Color.Transparent)
               .onClick(() => {
                 this.selectFriendFilter(friend.uid, getDisplayName(friend));
@@ -1861,22 +1916,23 @@ struct HomePage {
             }, (friend: FriendItem) => friend.uid)
           }
           .width('100%')
-          .padding({ left: 8, right: 8, top: 8, bottom: 10 })
+          .padding({ left: 12, right: 12, top: 8, bottom: 16 })
         }
         .width('100%')
-        .constraintSize({ maxHeight: 340 })
+        .constraintSize({ maxHeight: 380 })
         .scrollBar(BarState.Off)
       }
-      .width('84%')
-      .constraintSize({ maxHeight: '60%' })
+      .width('100%')
+      .constraintSize({ maxHeight: '68%' })
+      .padding({ bottom: this.safeBottomVp + 12 })
       .backgroundColor('#1C1C1E')
-      .borderRadius(24)
-      .border({ width: 1, color: '#2E2E30' })
-      .shadow({ radius: 28, color: '#88000000', offsetX: 0, offsetY: 10 })
-      .margin({ top: this.safeTopVp + 64 })
+      .borderRadius({ topLeft: 28, topRight: 28 })
+      .border({ width: { top: 1 }, color: '#2E2E30' })
+      .shadow({ radius: 28, color: '#99000000', offsetX: 0, offsetY: -6 })
+      .alignItems(HorizontalAlign.Center)
       .transition(
-        TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -12 }))
-          .animation({ duration: 220, curve: Curve.EaseOut })
+        TransitionEffect.translate({ y: '100%' })
+          .animation({ curve: curves.springMotion(0.55, 0.86) })
       )
     }
     .width('100%')
