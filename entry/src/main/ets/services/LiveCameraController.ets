@@ -263,10 +263,15 @@ export class LiveCameraController {
     }
   }
 
+  private isActualBizError(err: BusinessError | undefined | null): boolean {
+    return err !== undefined && err !== null && err.code !== undefined && err.code !== 0;
+  }
+
   private handlePhotoAvailable(err: BusinessError, photo: camera.Photo): void {
+    const hasErr = this.isActualBizError(err);
     hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
-      `photoAvailable received (hasErr=${err !== undefined && err !== null && err.code !== 0})`);
-    if (err !== undefined && err !== null && err.code !== 0) {
+      `photoAvailable received (hasErr=${hasErr})`);
+    if (hasErr) {
       hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
         `photoAvailable callback error: code=${err.code}, message=${err.message ?? ''}`);
       this.releasePhotoResources(null, photo ?? null);
@@ -300,7 +305,7 @@ export class LiveCameraController {
         'image read: calling mainImage.getComponent(JPEG)');
       mainImage.getComponent(image.ComponentType.JPEG, (compErr: BusinessError, component: image.Component) => {
         try {
-          if (compErr !== undefined && compErr !== null && compErr.code !== 0) {
+          if (this.isActualBizError(compErr)) {
             hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
               `image read getComponent error: code=${compErr.code}, message=${compErr.message ?? ''}`);
             this.rejectPendingCapture(`${compErr.message ?? 'Không thể đọc dữ liệu ảnh'} (code: ${compErr.code})`);

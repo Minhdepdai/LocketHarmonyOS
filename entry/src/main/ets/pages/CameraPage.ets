@@ -2,6 +2,7 @@ import { curves, promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { fileIo } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FriendItem, getDisplayName, UploadMomentOptions } from '../models/LocketModels';
 import { LiveCameraController } from '../services/LiveCameraController';
@@ -238,12 +239,123 @@ struct CameraPage {
     }
   }
 
-  private detectContentType(uri: string): string {
-    const lower = uri.toLowerCase();
-    if (lower.endsWith('.webp')) {
-      return 'image/webp';
+  private async packPixelMapUnderLimit(
+    packer: image.ImagePacker,
+    pixelMap: image.PixelMap,
+    format: string,
+    maxBytes: number
+  ): Promise<ArrayBuffer> {
+    const qualities: number[] = [82, 68, 52, 38];
+    let lastResult: ArrayBuffer = new ArrayBuffer(0);
+    for (let i = 0; i < qualities.length; i++) {
+      const packOpts: image.PackingOption = {
+        format: format,
+        quality: qualities[i]
+      };
+      lastResult = await packer.packToData(pixelMap, packOpts);
+      if (lastResult.byteLength <= maxBytes) {
+        return lastResult;
+      }
     }
-    return 'image/jpeg';
+    await pixelMap.scale(0.65, 0.65);
+    const fallbackOpts: image.PackingOption = {
+      format: format,
+      quality: 50
+    };
+    return await packer.packToData(pixelMap, fallbackOpts);
+  }
+
+  private async prepareUploadImageBytes(uri: string): Promise<ArrayBuffer> {
+    const logDomain = 0x0000;
+    const logTag = 'LocketUpload';
+    const maxBytes = 900 * 1024;
+    const maxSide = 1080;
+
+    const file = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    let origSize = 0;
+    let imageSource: image.ImageSource | null = null;
+    let pixelMap: image.PixelMap | null = null;
+    let packer: image.ImagePacker | null = null;
+
+    try {
+      const stat = fileIo.statSync(file.fd);
+      origSize = stat.size;
+      hilog.info(logDomain, logTag, '%{public}s',
+        `prepareUploadImageBytes: origSize=${origSize}, uri=${uri}`);
+
+      imageSource = image.createImageSource(file.fd);
+      const info = await imageSource.getImageInfo();
+      const origW = info.size.width;
+      const origH = info.size.height;
+      let targetW = origW;
+      let targetH = origH;
+      if (origW > maxSide || origH > maxSide) {
+        if (origW >= origH) {
+          targetW = maxSide;
+          targetH = Math.max(1, Math.round(origH * (maxSide / origW)));
+        } else {
+          targetH = maxSide;
+          targetW = Math.max(1, Math.round(origW * (maxSide / origH)));
+        }
+      }
+
+      const decodeOpts: image.DecodingOptions = {
+        desiredSize: {
+          width: targetW,
+          height: targetH
+        }
+      };
+      pixelMap = await imageSource.createPixelMap(decodeOpts);
+      packer = image.createImagePacker();
+
+      let packed: ArrayBuffer;
+      let usedFormat = 'image/webp';
+      try {
+        packed = await this.packPixelMapUnderLimit(packer, pixelMap, 'image/webp', maxBytes);
+      } catch (_webpErr) {
+        usedFormat = 'image/jpeg';
+        packed = await this.packPixelMapUnderLimit(packer, pixelMap, 'image/jpeg', maxBytes);
+      }
+
+      hilog.info(logDomain, logTag, '%{public}s',
+        `prepareUploadImageBytes done: ${origW}x${origH} -> ${targetW}x${targetH}, format=${usedFormat}, origBytes=${origSize}, finalBytes=${packed.byteLength}`);
+      return packed;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      hilog.error(logDomain, logTag, '%{public}s',
+        `prepareUploadImageBytes compress failed: ${msg}`);
+      if (origSize > 0 && origSize <= maxBytes) {
+        return this.readUriBytes(uri);
+      }
+      throw new Error(`Không thể nén ảnh để tải lên (${msg})`);
+    } finally {
+      if (packer !== null) {
+        try {
+          await packer.release();
+        } catch (_e) {
+          // Ignore
+        }
+      }
+      if (pixelMap !== null) {
+        try {
+          await pixelMap.release();
+        } catch (_e) {
+          // Ignore
+        }
+      }
+      if (imageSource !== null) {
+        try {
+          await imageSource.release();
+        } catch (_e) {
+          // Ignore
+        }
+      }
+      try {
+        fileIo.closeSync(file);
+      } catch (_e) {
+        // Ignore
+      }
+    }
   }
 
   private async handlePostMoment(): Promise<void> {
@@ -259,12 +371,12 @@ struct CameraPage {
     this.showPostSuccess = false;
     this.successScale = 0.5;
     try {
-      const bytes = this.readUriBytes(this.selectedPhotoUri);
+      const bytes = await this.prepareUploadImageBytes(this.selectedPhotoUri);
       const options: UploadMomentOptions = {
         caption: this.caption.trim(),
         recipients: this.sendToAll ? [] : this.selectedFriendUids,
         sentToAll: this.sendToAll,
-        contentType: this.detectContentType(this.selectedPhotoUri)
+        contentType: 'image/webp'
       };
       await LocketApiClient.getInstance().uploadAndPostPhotoMoment(bytes, options);
       this.isUploading = false;
