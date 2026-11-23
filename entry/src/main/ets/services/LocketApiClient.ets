@@ -232,14 +232,37 @@ interface FirestoreMessagesResponse {
   documents?: FirestoreMessageDoc[];
 }
 
+interface FirestoreLatestMessageFields {
+  body?: FirestoreStringField;
+  msg?: FirestoreStringField;
+  text?: FirestoreStringField;
+  sender?: FirestoreStringField;
+  sender_uid?: FirestoreStringField;
+  thumbnail_url?: FirestoreStringField;
+  reply_moment?: FirestoreStringField;
+  moment_uid?: FirestoreStringField;
+  moment?: FirestoreStringField;
+  created_at?: FirestoreTimestampField;
+  create_time?: FirestoreTimestampField;
+}
+
+interface FirestoreMapValue {
+  fields?: FirestoreLatestMessageFields;
+}
+
+interface FirestoreLatestMessageField {
+  stringValue?: string;
+  mapValue?: FirestoreMapValue;
+}
+
 interface FirestoreConversationFields {
   uid?: FirestoreStringField;
   conversation_uid?: FirestoreStringField;
   other_user?: FirestoreStringField;
   user?: FirestoreStringField;
   members?: FirestoreArrayField;
-  latest_message?: FirestoreStringField;
-  last_message?: FirestoreStringField;
+  latest_message?: FirestoreLatestMessageField;
+  last_message?: FirestoreLatestMessageField;
   last_updated?: FirestoreTimestampField;
   updated_at?: FirestoreTimestampField;
   last_updated_ms?: FirestoreIntegerField;
@@ -266,8 +289,9 @@ interface ResumableUploadMetadata {
 }
 
 interface ResumableUploadStartBody {
-  name: string;
+  bucket: string;
   contentType: string;
+  name: string;
   metadata: ResumableUploadMetadata;
   cacheControl: string;
 }
@@ -764,17 +788,8 @@ export class LocketApiClient {
       if (cFields === undefined) {
         continue;
       }
-      let matched = cFields.uid?.stringValue === otherUid;
-      if (!matched) {
-        const memberValues = cFields.members?.arrayValue?.values ?? [];
-        for (let j = 0; j < memberValues.length; j++) {
-          if (memberValues[j].stringValue === otherUid) {
-            matched = true;
-            break;
-          }
-        }
-      }
-      if (matched) {
+      const friendUid = this.extractFriendUidFromConversation(cFields, session.localId);
+      if (friendUid === otherUid) {
         const docName = convDoc.name ?? '';
         const lastSlash = docName.lastIndexOf('/');
         cid = lastSlash >= 0 ? docName.substring(lastSlash + 1) : docName;
@@ -826,6 +841,68 @@ export class LocketApiClient {
     }
   }
 
+  private extractFriendUidFromConversation(fields: FirestoreConversationFields, myUid: string): string {
+    const memberValues = fields.members?.arrayValue?.values ?? [];
+    if (memberValues.length > 0) {
+      for (let j = 0; j < memberValues.length; j++) {
+        const candidate = memberValues[j].stringValue ?? '';
+        if (candidate.length > 0 && candidate !== myUid) {
+          return candidate;
+        }
+      }
+      return '';
+    }
+    const otherUser = fields.other_user?.stringValue ?? '';
+    if (otherUser.length > 0 && otherUser !== myUid) {
+      return otherUser;
+    }
+    const fallbackUser = fields.user?.stringValue ?? '';
+    if (fallbackUser.length > 0 && fallbackUser !== myUid) {
+      return fallbackUser;
+    }
+    return '';
+  }
+
+  private extractLatestMessagePreview(fields: FirestoreConversationFields): string {
+    const latestField = fields.latest_message ?? fields.last_message;
+    if (latestField === undefined) {
+      return '';
+    }
+    const mapFields = latestField.mapValue?.fields;
+    if (mapFields !== undefined) {
+      const rawBody = mapFields.body?.stringValue ?? mapFields.msg?.stringValue ?? mapFields.text?.stringValue ?? '';
+      const cleaned = rawBody.replace(/\u200b/g, '').trim();
+      if (cleaned.length > 0) {
+        return cleaned;
+      }
+      const hasThumb = (mapFields.thumbnail_url?.stringValue ?? '').length > 0;
+      const hasMoment = (mapFields.reply_moment?.stringValue ?? '').length > 0 ||
+        (mapFields.moment_uid?.stringValue ?? '').length > 0 ||
+        (mapFields.moment?.stringValue ?? '').length > 0;
+      if (hasThumb || hasMoment) {
+        return 'Đã gửi một ảnh';
+      }
+      return '';
+    }
+    const plain = (latestField.stringValue ?? '').replace(/\u200b/g, '').trim();
+    return plain;
+  }
+
+  private extractLatestMessageTimestampMs(fields: FirestoreConversationFields): number {
+    const latestField = fields.latest_message ?? fields.last_message;
+    const mapFields = latestField?.mapValue?.fields;
+    if (mapFields !== undefined) {
+      const tsStr = mapFields.created_at?.timestampValue ?? mapFields.create_time?.timestampValue;
+      if (tsStr !== undefined && tsStr.length > 0) {
+        const parsed = Date.parse(tsStr);
+        if (!Number.isNaN(parsed)) {
+          return parsed;
+        }
+      }
+    }
+    return 0;
+  }
+
   public async getConversations(): Promise<ConversationSummary[]> {
     const session = await this.ensureValidToken();
     const convUrl = `${FIRESTORE_BASE}/users/${encodeURIComponent(session.localId)}/conversations?pageSize=50`;
@@ -836,7 +913,7 @@ export class LocketApiClient {
     );
 
     const convDocs = convRes.documents ?? [];
-    const summaries: ConversationSummary[] = [];
+    const dedupedByFriend = new Map<string, ConversationSummary>();
 
     for (let i = 0; i < convDocs.length; i++) {
       const convDoc = convDocs[i];
@@ -845,17 +922,7 @@ export class LocketApiClient {
         continue;
       }
 
-      let friendUid = fields.uid?.stringValue ?? fields.other_user?.stringValue ?? fields.user?.stringValue ?? '';
-      if (friendUid.length === 0 || friendUid === session.localId) {
-        const memberValues = fields.members?.arrayValue?.values ?? [];
-        for (let j = 0; j < memberValues.length; j++) {
-          const candidate = memberValues[j].stringValue ?? '';
-          if (candidate.length > 0 && candidate !== session.localId) {
-            friendUid = candidate;
-            break;
-          }
-        }
-      }
+      const friendUid = this.extractFriendUidFromConversation(fields, session.localId);
       if (friendUid.length === 0) {
         continue;
       }
@@ -863,34 +930,43 @@ export class LocketApiClient {
       const docName = convDoc.name ?? '';
       const lastSlash = docName.lastIndexOf('/');
       const convId = lastSlash >= 0 ? docName.substring(lastSlash + 1) : `conv_${i}`;
-      const lastMessage = fields.latest_message?.stringValue ?? fields.last_message?.stringValue ?? '';
+      const lastMessage = this.extractLatestMessagePreview(fields);
 
-      let lastUpdatedMs = 0;
-      const tsStr = fields.last_updated?.timestampValue ?? fields.updated_at?.timestampValue ?? convDoc.updateTime;
-      if (tsStr !== undefined && tsStr.length > 0) {
-        const parsed = Date.parse(tsStr);
-        if (!Number.isNaN(parsed)) {
-          lastUpdatedMs = parsed;
-        }
-      } else if (fields.last_updated_ms?.integerValue !== undefined) {
-        const num = Number(fields.last_updated_ms.integerValue);
-        if (!Number.isNaN(num)) {
-          lastUpdatedMs = num > 1000000000000 ? num : num * 1000;
+      let lastUpdatedMs = this.extractLatestMessageTimestampMs(fields);
+      if (lastUpdatedMs === 0) {
+        const tsStr = fields.last_updated?.timestampValue ?? fields.updated_at?.timestampValue ?? convDoc.updateTime;
+        if (tsStr !== undefined && tsStr.length > 0) {
+          const parsed = Date.parse(tsStr);
+          if (!Number.isNaN(parsed)) {
+            lastUpdatedMs = parsed;
+          }
+        } else if (fields.last_updated_ms?.integerValue !== undefined) {
+          const num = Number(fields.last_updated_ms.integerValue);
+          if (!Number.isNaN(num)) {
+            lastUpdatedMs = num > 1000000000000 ? num : num * 1000;
+          }
         }
       }
 
-      let friendName = friendUid.substring(0, 8);
-      let friendAvatar = '';
-      try {
-        const profile = await this.fetchUser(friendUid);
-        const full = `${profile.firstName} ${profile.lastName}`.trim();
-        friendName = full.length > 0 ? full : (profile.username.length > 0 ? profile.username : friendName);
-        friendAvatar = profile.profilePictureUrl;
-      } catch (_err) {
-        // Keep fallback name
+      const existing = dedupedByFriend.get(friendUid);
+      if (existing !== undefined && existing.lastUpdatedMs >= lastUpdatedMs) {
+        continue;
       }
 
-      summaries.push({
+      let friendName = existing !== undefined ? existing.friendName : friendUid.substring(0, 8);
+      let friendAvatar = existing !== undefined ? existing.friendAvatar : '';
+      if (existing === undefined) {
+        try {
+          const profile = await this.fetchUser(friendUid);
+          const full = `${profile.firstName} ${profile.lastName}`.trim();
+          friendName = full.length > 0 ? full : (profile.username.length > 0 ? profile.username : friendName);
+          friendAvatar = profile.profilePictureUrl;
+        } catch (_err) {
+          // Keep fallback name
+        }
+      }
+
+      dedupedByFriend.set(friendUid, {
         conversationId: convId,
         friendUid: friendUid,
         friendName: friendName,
@@ -900,6 +976,10 @@ export class LocketApiClient {
       });
     }
 
+    const summaries: ConversationSummary[] = [];
+    dedupedByFriend.forEach((summary: ConversationSummary) => {
+      summaries.push(summary);
+    });
     summaries.sort((a: ConversationSummary, b: ConversationSummary) => b.lastUpdatedMs - a.lastUpdatedMs);
     return summaries;
   }
@@ -932,53 +1012,23 @@ export class LocketApiClient {
     return '';
   }
 
-  private async uploadMediaFallback(
-    encodedPath: string,
-    contentType: string,
-    idToken: string,
-    imageBytes: ArrayBuffer
-  ): Promise<FirebaseStorageUploadResponse> {
-    const fallbackUrl = `${FIREBASE_STORAGE_BASE}?uploadType=media&name=${encodedPath}`;
-    const httpRequest = http.createHttp();
-    try {
-      const uploadHeaders: Record<string, string> = {
-        'Content-Type': contentType,
-        'Authorization': `Bearer ${idToken}`
-      };
-      const response = await httpRequest.request(fallbackUrl, {
-        method: http.RequestMethod.POST,
-        header: uploadHeaders,
-        extraData: imageBytes,
-        expectDataType: http.HttpDataType.STRING,
-        connectTimeout: 30000,
-        readTimeout: 30000
-      });
-      const rawText = typeof response.result === 'string' ? response.result : JSON.stringify(response.result);
-      if (response.responseCode < 200 || response.responseCode >= 300) {
-        throw new Error(`Upload failed (${response.responseCode}): ${rawText}`);
-      }
-      return JSON.parse(rawText) as FirebaseStorageUploadResponse;
-    } finally {
-      httpRequest.destroy();
-    }
-  }
-
   public async uploadAndPostPhotoMoment(imageBytes: ArrayBuffer, options: UploadMomentOptions): Promise<void> {
     const session = await this.ensureValidToken();
     const contentType = options.contentType !== undefined && options.contentType.length > 0
       ? options.contentType
       : 'image/webp';
     const ext = contentType === 'image/jpeg' ? 'jpg' : 'webp';
-    const uniqueId = `${Date.now()}_${this.generateHexId().substring(0, 8)}`;
-    const objectPath = `users/${session.localId}/moments/thumbnails/${uniqueId}.${ext}`;
+    const fileName = `${Date.now()}_${this.generateHexId().substring(0, 8)}.${ext}`;
+    const objectPath = 'users/' + session.localId + '/moments/thumbnails/' + fileName;
     const encodedPath = encodeURIComponent(objectPath);
+    const initUrl = `${FIREBASE_STORAGE_BASE}/${encodedPath}?uploadType=resumable&name=${encodedPath}`;
 
     // Step 1: Initiate Firebase Storage resumable upload session
     let uploadUrl = '';
-    const startUrl = `${FIREBASE_STORAGE_BASE}?uploadType=resumable&name=${encodedPath}`;
     const startBody: ResumableUploadStartBody = {
-      name: objectPath,
+      bucket: '',
       contentType: contentType,
+      name: objectPath,
       metadata: {
         visibility: 'private',
         creator: session.localId
@@ -989,14 +1039,17 @@ export class LocketApiClient {
     const startReq = http.createHttp();
     try {
       const startHeaders: Record<string, string> = {
-        'Authorization': `Bearer ${session.idToken}`,
-        'X-Goog-Upload-Protocol': 'resumable',
-        'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': `${imageBytes.byteLength}`,
-        'X-Goog-Upload-Header-Content-Type': contentType,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Authorization': `Firebase ${session.idToken}`,
+        'x-goog-upload-protocol': 'resumable',
+        'x-goog-upload-command': 'start',
+        'x-goog-upload-content-type': contentType,
+        'x-goog-upload-content-length': `${imageBytes.byteLength}`,
+        'x-firebase-storage-version': 'ios/12.12.1',
+        'x-firebase-gmpid': '1:641029076083:ios:cc8eb46290d69b234fa606',
+        'User-Agent': 'FirebaseAuth.iOS/10.23.1 com.locket.Locket/2.8.0 iPhone/18.0 hw/iPhone12_1 (GTMSUF/1)'
       };
-      const startRes = await startReq.request(startUrl, {
+      const startRes = await startReq.request(initUrl, {
         method: http.RequestMethod.POST,
         header: startHeaders,
         extraData: JSON.stringify(startBody),
@@ -1004,51 +1057,55 @@ export class LocketApiClient {
         connectTimeout: 20000,
         readTimeout: 20000
       });
-      if (startRes.responseCode >= 200 && startRes.responseCode < 300) {
-        uploadUrl = this.extractHeaderCaseInsensitive(startRes.header, 'x-goog-upload-url');
+      const startRaw = typeof startRes.result === 'string' ? startRes.result : JSON.stringify(startRes.result);
+      if (startRes.responseCode < 200 || startRes.responseCode >= 300) {
+        throw new Error(`Upload init failed (${startRes.responseCode}): ${startRaw}`);
       }
-    } catch (_err) {
-      uploadUrl = '';
+      uploadUrl = this.extractHeaderCaseInsensitive(startRes.header, 'x-goog-upload-url');
     } finally {
       startReq.destroy();
     }
 
-    // Step 2: Upload bytes via PUT to resumable session URL (or fallback to uploadType=media)
+    if (uploadUrl.length === 0) {
+      throw new Error('Không nhận được URL tải ảnh lên');
+    }
+
+    // Step 2: Upload bytes via PUT to resumable session URL
     let uploadRes: FirebaseStorageUploadResponse;
-    if (uploadUrl.length > 0) {
-      const putReq = http.createHttp();
-      try {
-        const putHeaders: Record<string, string> = {
-          'X-Goog-Upload-Command': 'upload, finalize',
-          'X-Goog-Upload-Offset': '0',
-          'Content-Type': contentType
-        };
-        const putRes = await putReq.request(uploadUrl, {
-          method: http.RequestMethod.PUT,
-          header: putHeaders,
-          extraData: imageBytes,
-          expectDataType: http.HttpDataType.STRING,
-          connectTimeout: 30000,
-          readTimeout: 30000
-        });
-        const rawText = typeof putRes.result === 'string' ? putRes.result : JSON.stringify(putRes.result);
-        if (putRes.responseCode < 200 || putRes.responseCode >= 300) {
-          throw new Error(`Resumable upload failed (${putRes.responseCode}): ${rawText}`);
-        }
-        uploadRes = JSON.parse(rawText) as FirebaseStorageUploadResponse;
-      } finally {
-        putReq.destroy();
+    const putReq = http.createHttp();
+    try {
+      const putHeaders: Record<string, string> = {
+        'Content-Type': 'application/octet-stream',
+        'x-goog-upload-protocol': 'resumable',
+        'x-goog-upload-command': 'upload, finalize',
+        'x-goog-upload-offset': '0',
+        'x-goog-upload-content-length': `${imageBytes.byteLength}`
+      };
+      const putRes = await putReq.request(uploadUrl, {
+        method: http.RequestMethod.PUT,
+        header: putHeaders,
+        extraData: imageBytes,
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 30000,
+        readTimeout: 30000
+      });
+      const rawText = typeof putRes.result === 'string' ? putRes.result : JSON.stringify(putRes.result);
+      if (putRes.responseCode < 200 || putRes.responseCode >= 300) {
+        throw new Error(`Resumable upload failed (${putRes.responseCode}): ${rawText}`);
       }
-    } else {
-      uploadRes = await this.uploadMediaFallback(encodedPath, contentType, session.idToken, imageBytes);
+      uploadRes = JSON.parse(rawText) as FirebaseStorageUploadResponse;
+    } finally {
+      putReq.destroy();
     }
 
     // Step 3: Build Firebase Storage download URL with token
     const downloadTokens = uploadRes.downloadTokens ?? '';
-    const firstToken = downloadTokens.split(',')[0];
-    const uploadedPath = uploadRes.name ?? objectPath;
-    const finalEncodedPath = encodeURIComponent(uploadedPath);
-    const thumbnailUrl = `https://firebasestorage.googleapis.com:443/v0/b/locket-img/o/${finalEncodedPath}?alt=media&token=${encodeURIComponent(firstToken)}`;
+    const downloadToken = downloadTokens.split(',')[0];
+    if (downloadToken.length === 0) {
+      throw new Error('Không nhận được token tải ảnh');
+    }
+    const thumbnailUrl = 'https://firebasestorage.googleapis.com:443/v0/b/locket-img/o/' +
+      encodedPath + '?alt=media&token=' + encodeURIComponent(downloadToken);
 
     // Step 4: Publish moment via postMomentV2
     const nowSec = Math.floor(Date.now() / 1000);

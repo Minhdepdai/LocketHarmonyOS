@@ -24,6 +24,7 @@ struct ChatPage {
   @State isSending: boolean = false;
   @StorageProp('safe_top_vp') safeTopVp: number = 38;
   @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
+  private listScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     const params = router.getParams() as ChatRouteParams | undefined;
@@ -58,6 +59,18 @@ struct ChatPage {
     }
   }
 
+  private scrollToBottom(animated: boolean = false): void {
+    if (this.messages.length > 0) {
+      setTimeout(() => {
+        try {
+          this.listScroller.scrollToIndex(this.messages.length - 1, animated, ScrollAlign.END);
+        } catch (_err) {
+          this.listScroller.scrollEdge(Edge.Bottom);
+        }
+      }, 60);
+    }
+  }
+
   private async loadMessages(): Promise<void> {
     if (this.friendUid.length === 0) {
       this.isLoading = false;
@@ -71,6 +84,7 @@ struct ChatPage {
       promptAction.showToast({ message: msg });
     } finally {
       this.isLoading = false;
+      this.scrollToBottom(false);
     }
   }
 
@@ -93,7 +107,9 @@ struct ChatPage {
         createdAtMs: Date.now()
       };
       this.messages = [...this.messages, optimistic];
+      this.scrollToBottom(true);
       await this.loadMessages();
+      this.scrollToBottom(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Gửi tin nhắn thất bại';
       promptAction.showToast({ message: msg });
@@ -225,7 +241,7 @@ struct ChatPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else {
-        List({ space: 12 }) {
+        List({ space: 10, scroller: this.listScroller }) {
           ForEach(this.messages, (msg: ChatMessage) => {
             ListItem() {
               Column({ space: 8 }) {

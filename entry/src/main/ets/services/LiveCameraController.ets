@@ -12,6 +12,10 @@ export class LiveCameraController {
   private photoSession: camera.PhotoSession | null = null;
   private isRunning: boolean = false;
   private isCapturing: boolean = false;
+  private pendingCaptureContext: common.UIAbilityContext | null = null;
+  private pendingResolve: ((path: string) => void) | null = null;
+  private pendingReject: ((err: Error) => void) | null = null;
+  private captureTimeoutId: number = -1;
   public currentZoomRatio: number = 1.0;
 
   public isSessionRunning(): boolean {
@@ -140,6 +144,9 @@ export class LiveCameraController {
 
       const previewOut = manager.createPreviewOutput(previewProfile, surfaceId);
       const photoOut = manager.createPhotoOutput(photoProfile);
+      photoOut.on('photoAvailable', (err: BusinessError, photo: camera.Photo) => {
+        this.handlePhotoAvailable(err, photo);
+      });
       const input = manager.createCameraInput(device);
       const session = manager.createSession(camera.SceneMode.NORMAL_PHOTO) as camera.PhotoSession;
 
@@ -165,6 +172,107 @@ export class LiveCameraController {
     }
   }
 
+  private clearPendingCapture(): void {
+    if (this.captureTimeoutId !== -1) {
+      clearTimeout(this.captureTimeoutId);
+      this.captureTimeoutId = -1;
+    }
+    this.isCapturing = false;
+    this.pendingCaptureContext = null;
+    this.pendingResolve = null;
+    this.pendingReject = null;
+  }
+
+  private rejectPendingCapture(message: string): void {
+    const rejectFn = this.pendingReject;
+    this.clearPendingCapture();
+    if (rejectFn !== null) {
+      rejectFn(new Error(message));
+    }
+  }
+
+  private resolvePendingCapture(filePath: string): void {
+    const resolveFn = this.pendingResolve;
+    this.clearPendingCapture();
+    if (resolveFn !== null) {
+      resolveFn(filePath);
+    }
+  }
+
+  private releasePhotoResources(mainImage: image.Image | null, photo: camera.Photo | null): void {
+    if (mainImage !== null) {
+      try {
+        mainImage.release();
+      } catch (_e) {
+        // Ignore
+      }
+    }
+    if (photo !== null) {
+      try {
+        photo.release();
+      } catch (_e) {
+        // Ignore
+      }
+    }
+  }
+
+  private handlePhotoAvailable(err: BusinessError, photo: camera.Photo): void {
+    if (err !== undefined && err !== null) {
+      this.releasePhotoResources(null, photo ?? null);
+      this.rejectPendingCapture(err.message ?? 'Không thể chụp ảnh');
+      return;
+    }
+    if (photo === undefined || photo === null) {
+      this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
+      return;
+    }
+    const mainImage = photo.main;
+    if (mainImage === undefined || mainImage === null) {
+      this.releasePhotoResources(null, photo);
+      this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
+      return;
+    }
+    const ctx = this.pendingCaptureContext;
+    if (ctx === null) {
+      this.releasePhotoResources(mainImage, photo);
+      return;
+    }
+
+    try {
+      mainImage.getComponent(image.ComponentType.JPEG, (compErr: BusinessError, component: image.Component) => {
+        try {
+          if (compErr !== undefined && compErr !== null) {
+            this.rejectPendingCapture(compErr.message ?? 'Không thể đọc dữ liệu ảnh');
+            return;
+          }
+          if (component === undefined || component === null ||
+            component.byteBuffer === undefined || component.byteBuffer.byteLength === 0) {
+            this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
+            return;
+          }
+          const copied = new Uint8Array(component.byteBuffer).slice().buffer;
+          const filePath = `${ctx.cacheDir}/locket_capture_${Date.now()}.jpg`;
+          const file = fileIo.openSync(filePath, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE);
+          try {
+            fileIo.writeSync(file.fd, copied);
+          } finally {
+            fileIo.closeSync(file);
+          }
+          this.resolvePendingCapture(filePath);
+        } catch (writeErr) {
+          const msg = writeErr instanceof Error ? writeErr.message : 'Lưu ảnh thất bại';
+          this.rejectPendingCapture(msg);
+        } finally {
+          this.releasePhotoResources(mainImage, photo);
+        }
+      });
+    } catch (e) {
+      this.releasePhotoResources(mainImage, photo);
+      const msg = e instanceof Error ? e.message : 'Không thể đọc dữ liệu ảnh';
+      this.rejectPendingCapture(msg);
+    }
+  }
+
   public async capturePhotoToFile(context: common.UIAbilityContext): Promise<string> {
     if (this.photoOutput === null || !this.isRunning) {
       throw new Error('Camera chưa sẵn sàng');
@@ -176,92 +284,31 @@ export class LiveCameraController {
     const output = this.photoOutput;
 
     return new Promise<string>((resolve, reject) => {
-      let settled = false;
-      const cleanupListener = (): void => {
-        try {
-          output.off('photoAvailable');
-        } catch (_err) {
-          // Ignore
-        }
-      };
-
-      const finishError = (message: string): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.isCapturing = false;
-        cleanupListener();
-        reject(new Error(message));
-      };
-
-      const finishSuccess = (filePath: string): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.isCapturing = false;
-        cleanupListener();
-        resolve(filePath);
-      };
+      this.pendingCaptureContext = context;
+      this.pendingResolve = resolve;
+      this.pendingReject = reject;
+      this.captureTimeoutId = setTimeout(() => {
+        this.rejectPendingCapture('Chụp ảnh quá thời gian chờ');
+      }, 10000);
 
       try {
-        output.on('photoAvailable', (err: BusinessError, photo: camera.Photo) => {
-          if (err !== undefined && err !== null) {
-            finishError(err.message ?? 'Không thể chụp ảnh');
-            return;
-          }
-          const mainImage = photo.main;
-          mainImage.getComponent(image.ComponentType.JPEG, (compErr: BusinessError, component: image.Component) => {
-            try {
-              if (compErr !== undefined && compErr !== null) {
-                finishError(compErr.message ?? 'Không thể đọc dữ liệu ảnh');
-                return;
-              }
-              const copied = new Uint8Array(component.byteBuffer).slice().buffer;
-              const filePath = `${context.cacheDir}/locket_capture_${Date.now()}.jpg`;
-              const file = fileIo.openSync(filePath, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE);
-              try {
-                fileIo.writeSync(file.fd, copied);
-              } finally {
-                fileIo.closeSync(file);
-              }
-              finishSuccess(filePath);
-            } catch (writeErr) {
-              const msg = writeErr instanceof Error ? writeErr.message : 'Lưu ảnh thất bại';
-              finishError(msg);
-            } finally {
-              try {
-                mainImage.release();
-              } catch (_e) {
-                // Ignore
-              }
-              try {
-                photo.release();
-              } catch (_e) {
-                // Ignore
-              }
-            }
-          });
-        });
-
         const setting: camera.PhotoCaptureSetting = {
           quality: camera.QualityLevel.QUALITY_LEVEL_HIGH,
           rotation: camera.ImageRotation.ROTATION_0
         };
         output.capture(setting).catch((capErr: BusinessError) => {
-          finishError(capErr.message ?? 'Chụp ảnh thất bại');
+          this.rejectPendingCapture(capErr.message ?? 'Chụp ảnh thất bại');
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Lỗi camera';
-        finishError(msg);
+        this.rejectPendingCapture(msg);
       }
     });
   }
 
   public async release(): Promise<void> {
     this.isRunning = false;
-    this.isCapturing = false;
+    this.rejectPendingCapture('Camera đã đóng');
     this.currentZoomRatio = 1.0;
     if (this.photoOutput !== null) {
       try {
