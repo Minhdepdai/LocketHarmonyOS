@@ -2,6 +2,7 @@ import { curves, promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { fileIo } from '@kit.CoreFileKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FriendItem, getDisplayName, UploadMomentOptions } from '../models/LocketModels';
 import { LiveCameraController } from '../services/LiveCameraController';
 import { LocketApiClient } from '../services/LocketApiClient';
@@ -170,35 +171,39 @@ struct CameraPage {
     if (this.isCapturing) {
       return;
     }
+    const logDomain = 0x0000;
+    const logTag = 'LocketCamera';
     const context = getContext(this) as common.UIAbilityContext;
     if (!this.isCameraReady) {
+      hilog.info(logDomain, logTag, '%{public}s', 'CameraPage captureFromCamera: starting live camera first');
       await this.startLiveCamera();
+    }
+    if (!this.isCameraReady) {
+      hilog.error(logDomain, logTag, '%{public}s', 'CameraPage captureFromCamera: camera session not ready');
+      promptAction.showToast({ message: 'Camera chưa sẵn sàng, vui lòng thử lại' });
+      return;
     }
     this.isCapturing = true;
     try {
-      let filePath = '';
-      if (this.isCameraReady) {
-        try {
-          filePath = await this.liveCamera.capturePhotoToFile(context);
-          await this.stopLiveCamera();
-        } catch (_captureErr) {
-          this.isCameraReady = false;
-          this.zoomRatio = 1.0;
-          filePath = await this.liveCamera.pickPhotoWithSystemCamera(context, this.isFrontCamera);
-        }
-      } else {
-        filePath = await this.liveCamera.pickPhotoWithSystemCamera(context, this.isFrontCamera);
-      }
+      hilog.info(logDomain, logTag, '%{public}s', 'CameraPage captureFromCamera: capturing photo in-app');
+      const filePath = await this.liveCamera.capturePhotoToFile(context);
+      await this.stopLiveCamera();
 
       if (filePath.length > 0) {
         this.selectedPhotoUri = filePath;
-      } else if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0) {
-        this.startLiveCamera();
+      } else {
+        promptAction.showToast({ message: 'Không thể đọc dữ liệu ảnh' });
+        if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0) {
+          this.startLiveCamera();
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Không thể chụp ảnh';
+      hilog.error(logDomain, logTag, '%{public}s', `CameraPage captureFromCamera error: ${msg}`);
       promptAction.showToast({ message: msg });
-      if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0) {
+      if (this.selectedPhotoUri.length === 0 && this.cameraSurfaceId.length > 0 && !this.liveCamera.isSessionRunning()) {
+        this.isCameraReady = false;
+        this.zoomRatio = 1.0;
         this.startLiveCamera();
       }
     } finally {

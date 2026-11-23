@@ -1,4 +1,5 @@
 import { http } from '@kit.NetworkKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   AuthSession,
   ChatMessage,
@@ -992,6 +993,22 @@ export class LocketApiClient {
     return out;
   }
 
+  private generateAlnum20(): string {
+    const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+    let out = '';
+    for (let i = 0; i < 20; i++) {
+      out += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return out;
+  }
+
+  private truncateLog(text: string): string {
+    if (text.length <= 500) {
+      return text;
+    }
+    return text.substring(0, 500);
+  }
+
   private extractHeaderCaseInsensitive(headerObj: Object | undefined, targetName: string): string {
     if (headerObj === undefined || headerObj === null) {
       return '';
@@ -1012,152 +1029,199 @@ export class LocketApiClient {
   }
 
   public async uploadAndPostPhotoMoment(imageBytes: ArrayBuffer, options: UploadMomentOptions): Promise<void> {
-    const session = await this.ensureValidToken();
-    const contentType = options.contentType !== undefined && options.contentType.length > 0
-      ? options.contentType
-      : 'image/webp';
-    const ext = contentType === 'image/jpeg' ? 'jpg' : 'webp';
-    const fileName = `${Date.now()}_${this.generateHexId().substring(0, 8)}.${ext}`;
-    const objectPath = 'users/' + session.localId + '/moments/thumbnails/' + fileName;
-    const encodedPath = encodeURIComponent(objectPath);
-    const initUrl = `${FIREBASE_STORAGE_BASE}/${encodedPath}?uploadType=resumable&name=${encodedPath}`;
-
-    // Step 1: Initiate Firebase Storage resumable upload session
-    let uploadUrl = '';
-    const startBody: ResumableUploadStartBody = {
-      name: objectPath,
-      contentType: 'image/*',
-      bucket: '',
-      metadata: {
-        creator: session.localId,
-        visibility: 'private'
-      }
-    };
-
-    const startReq = http.createHttp();
+    const logDomain = 0x0000;
+    const logTag = 'LocketUpload';
     try {
-      const startHeaders: Record<string, string> = {
-        'Content-Type': 'application/json; charset=UTF-8',
-        'Authorization': 'Bearer ' + session.idToken,
-        'x-goog-upload-protocol': 'resumable',
-        'x-goog-upload-command': 'start',
-        'x-goog-upload-content-length': '' + imageBytes.byteLength,
-        'x-goog-upload-content-type': 'image/webp',
-        'x-firebase-storage-version': 'ios/10.13.0',
-        'x-firebase-gmpid': '1:641029076083:ios:cc8eb46290d69b234fa609',
-        'User-Agent': 'com.locket.Locket/1.43.1 iPhone/17.3 hw/iPhone15_3 (GTMSUF/1)'
+      const session = await this.ensureValidToken();
+      const fileName = this.generateAlnum20() + '.webp';
+      const objectPath = 'users/' + session.localId + '/moments/thumbnails/' + fileName;
+      const encodedPath = encodeURIComponent(objectPath);
+      const initUrl = `${FIREBASE_STORAGE_BASE}/${encodedPath}?uploadType=resumable&name=${encodedPath}`;
+
+      // Step 1: Initiate Firebase Storage resumable upload session
+      let uploadUrl = '';
+      const startBody: ResumableUploadStartBody = {
+        name: objectPath,
+        contentType: 'image/*',
+        bucket: '',
+        metadata: {
+          creator: session.localId,
+          visibility: 'private'
+        }
       };
-      const startRes = await startReq.request(initUrl, {
-        method: http.RequestMethod.POST,
-        header: startHeaders,
-        extraData: JSON.stringify(startBody),
-        expectDataType: http.HttpDataType.STRING,
-        connectTimeout: 20000,
-        readTimeout: 20000
-      });
-      const startRaw = typeof startRes.result === 'string' ? startRes.result : JSON.stringify(startRes.result);
-      if (startRes.responseCode < 200 || startRes.responseCode >= 300) {
-        throw new Error(`Upload init failed (${startRes.responseCode}): ${startRaw}`);
-      }
-      uploadUrl = this.extractHeaderCaseInsensitive(startRes.header, 'x-goog-upload-url');
-    } finally {
-      startReq.destroy();
-    }
 
-    if (uploadUrl.length === 0) {
-      throw new Error('Không nhận được URL tải ảnh lên');
-    }
-
-    // Step 2: Upload bytes via PUT to resumable session URL
-    let uploadRes: FirebaseStorageUploadResponse = {};
-    const putReq = http.createHttp();
-    try {
-      const putHeaders: Record<string, string> = {
-        'Content-Type': 'application/octet-stream',
-        'x-goog-upload-protocol': 'resumable',
-        'x-goog-upload-command': 'upload, finalize',
-        'x-goog-upload-offset': '0',
-        'x-goog-upload-content-length': '' + imageBytes.byteLength
-      };
-      const putRes = await putReq.request(uploadUrl, {
-        method: http.RequestMethod.PUT,
-        header: putHeaders,
-        extraData: imageBytes,
-        expectDataType: http.HttpDataType.STRING,
-        connectTimeout: 30000,
-        readTimeout: 30000
-      });
-      const rawText = typeof putRes.result === 'string' ? putRes.result : JSON.stringify(putRes.result);
-      if (putRes.responseCode < 200 || putRes.responseCode >= 300) {
-        throw new Error(`Resumable upload failed (${putRes.responseCode}): ${rawText}`);
+      hilog.info(logDomain, logTag, '%{public}s',
+        `Step1 POST initUrl=${initUrl}, bytes=${imageBytes.byteLength}`);
+      const startReq = http.createHttp();
+      try {
+        const startHeaders: Record<string, string> = {
+          'Content-Type': 'application/json; charset=UTF-8',
+          'Authorization': 'Bearer ' + session.idToken,
+          'x-goog-upload-protocol': 'resumable',
+          'x-goog-upload-command': 'start',
+          'x-goog-upload-content-length': '' + imageBytes.byteLength,
+          'x-goog-upload-content-type': 'image/webp',
+          'x-firebase-storage-version': 'ios/10.13.0',
+          'x-firebase-gmpid': '1:641029076083:ios:cc8eb46290d69b234fa609',
+          'User-Agent': 'com.locket.Locket/1.43.1 iPhone/17.3 hw/iPhone15_3 (GTMSUF/1)'
+        };
+        const startRes = await startReq.request(initUrl, {
+          method: http.RequestMethod.POST,
+          header: startHeaders,
+          extraData: JSON.stringify(startBody),
+          expectDataType: http.HttpDataType.STRING,
+          connectTimeout: 20000,
+          readTimeout: 20000
+        });
+        const startRaw = typeof startRes.result === 'string' ? startRes.result : JSON.stringify(startRes.result);
+        uploadUrl = this.extractHeaderCaseInsensitive(startRes.header, 'x-goog-upload-url');
+        hilog.info(logDomain, logTag, '%{public}s',
+          `Step1 response: url=${initUrl}, status=${startRes.responseCode}, hasUploadUrl=${uploadUrl.length > 0}, body=${this.truncateLog(startRaw)}`);
+        if (startRes.responseCode < 200 || startRes.responseCode >= 300) {
+          throw new Error(`Upload init failed (${startRes.responseCode}): ${startRaw}`);
+        }
+      } finally {
+        startReq.destroy();
       }
-      if (rawText.trim().length > 0) {
-        uploadRes = JSON.parse(rawText) as FirebaseStorageUploadResponse;
-      }
-    } finally {
-      putReq.destroy();
-    }
 
-    // Step 3: Read downloadTokens (with fallback metadata GET if empty)
-    let downloadTokens = uploadRes.downloadTokens ?? '';
-    let downloadToken = downloadTokens.split(',')[0].trim();
-    if (downloadToken.length === 0) {
+      if (uploadUrl.length === 0) {
+        throw new Error('Không nhận được URL tải ảnh lên');
+      }
+
+      // Step 2: Upload bytes via PUT to X-Goog-Upload-URL
+      let uploadRes: FirebaseStorageUploadResponse = {};
+      hilog.info(logDomain, logTag, '%{public}s', `Step2 PUT uploadUrl=${uploadUrl}`);
+      const putReq = http.createHttp();
+      try {
+        const putHeaders: Record<string, string> = {
+          'Content-Type': 'application/octet-stream',
+          'x-goog-upload-protocol': 'resumable',
+          'x-goog-upload-command': 'upload, finalize',
+          'x-goog-upload-offset': '0',
+          'x-goog-upload-content-length': '' + imageBytes.byteLength
+        };
+        const putRes = await putReq.request(uploadUrl, {
+          method: http.RequestMethod.PUT,
+          header: putHeaders,
+          extraData: imageBytes,
+          expectDataType: http.HttpDataType.STRING,
+          connectTimeout: 30000,
+          readTimeout: 30000
+        });
+        const rawText = typeof putRes.result === 'string' ? putRes.result : JSON.stringify(putRes.result);
+        hilog.info(logDomain, logTag, '%{public}s',
+          `Step2 response: url=${uploadUrl}, status=${putRes.responseCode}, hasUploadUrl=true, body=${this.truncateLog(rawText)}`);
+        if (putRes.responseCode < 200 || putRes.responseCode >= 300) {
+          throw new Error(`Resumable upload failed (${putRes.responseCode}): ${rawText}`);
+        }
+        if (rawText.trim().length > 0) {
+          uploadRes = JSON.parse(rawText) as FirebaseStorageUploadResponse;
+        }
+      } finally {
+        putReq.destroy();
+      }
+
+      // Step 3: GET metadata with Bearer -> downloadTokens
+      let downloadTokens = uploadRes.downloadTokens ?? '';
+      let downloadToken = downloadTokens.split(',')[0].trim();
       const metaUrl = `${FIREBASE_STORAGE_BASE}/${encodedPath}`;
-      const metaRes = await this.requestJson<FirebaseStorageUploadResponse>(
-        metaUrl,
-        http.RequestMethod.GET,
-        { 'Authorization': 'Bearer ' + session.idToken }
-      );
-      downloadTokens = metaRes.downloadTokens ?? '';
-      downloadToken = downloadTokens.split(',')[0].trim();
-    }
-    if (downloadToken.length === 0) {
-      throw new Error('Không nhận được token tải ảnh');
-    }
-    const thumbnailUrl = `${FIREBASE_STORAGE_BASE}/${encodedPath}?alt=media&token=${downloadToken}`;
-
-    // Step 4: Publish moment via postMomentV2
-    const nowSec = Math.floor(Date.now() / 1000);
-    const md5Value = `${this.generateHexId()}_${nowSec}`;
-    const trimmedCaption = options.caption.trim();
-    const postBody: PostMomentRequestBody = {
-      data: {
-        thumbnail_url: thumbnailUrl,
-        overlays: [],
-        sent_to_self_only: false,
-        sent_to_all: options.sentToAll,
-        recipients: options.sentToAll ? [] : options.recipients,
-        md5: md5Value,
-        caption: trimmedCaption
+      hilog.info(logDomain, logTag, '%{public}s', `Step3 GET metadata url=${metaUrl}`);
+      const metaReq = http.createHttp();
+      try {
+        const metaRes = await metaReq.request(metaUrl, {
+          method: http.RequestMethod.GET,
+          header: { 'Authorization': 'Bearer ' + session.idToken },
+          expectDataType: http.HttpDataType.STRING,
+          connectTimeout: 15000,
+          readTimeout: 15000
+        });
+        const metaRaw = typeof metaRes.result === 'string' ? metaRes.result : JSON.stringify(metaRes.result);
+        hilog.info(logDomain, logTag, '%{public}s',
+          `Step3 response: url=${metaUrl}, status=${metaRes.responseCode}, hasUploadUrl=${uploadUrl.length > 0}, body=${this.truncateLog(metaRaw)}`);
+        if (metaRes.responseCode >= 200 && metaRes.responseCode < 300 && metaRaw.trim().length > 0) {
+          const parsedMeta = JSON.parse(metaRaw) as FirebaseStorageUploadResponse;
+          const metaTokens = parsedMeta.downloadTokens ?? '';
+          const metaToken = metaTokens.split(',')[0].trim();
+          if (metaToken.length > 0) {
+            downloadToken = metaToken;
+          }
+        } else if (downloadToken.length === 0) {
+          throw new Error(`Metadata GET failed (${metaRes.responseCode}): ${metaRaw}`);
+        }
+      } finally {
+        metaReq.destroy();
       }
-    };
-    await this.requestJson<GenericApiResponse>(
-      `${LOCKET_API_BASE}/postMomentV2`,
-      http.RequestMethod.POST,
-      this.buildHeaders(session.idToken),
-      JSON.stringify(postBody)
-    );
-
-    // Immediately sync Home Screen Widgets with the newly posted moment
-    let senderName = session.displayName.length > 0 ? session.displayName : 'Bạn';
-    const cachedMe = this.userCache.get(session.localId);
-    if (cachedMe !== undefined) {
-      const fullName = `${cachedMe.firstName} ${cachedMe.lastName}`.trim();
-      if (fullName.length > 0) {
-        senderName = fullName;
-      } else if (cachedMe.username.length > 0) {
-        senderName = cachedMe.username;
+      if (downloadToken.length === 0) {
+        throw new Error('Không nhận được token tải ảnh');
       }
+      const thumbnailUrl = `https://firebasestorage.googleapis.com/v0/b/locket-img/o/${encodedPath}?alt=media&token=${downloadToken}`;
+
+      // Step 4: Publish moment via postMomentV2
+      const nowSec = Math.floor(Date.now() / 1000);
+      const md5Value = `${this.generateHexId()}_${nowSec}`;
+      const trimmedCaption = options.caption.trim();
+      const postBody: PostMomentRequestBody = {
+        data: {
+          thumbnail_url: thumbnailUrl,
+          overlays: [],
+          sent_to_self_only: false,
+          sent_to_all: options.sentToAll,
+          recipients: options.sentToAll ? [] : options.recipients,
+          md5: md5Value,
+          caption: trimmedCaption
+        }
+      };
+      const postUrl = `${LOCKET_API_BASE}/postMomentV2`;
+      hilog.info(logDomain, logTag, '%{public}s',
+        `Step4 POST postUrl=${postUrl}, thumbnailUrl=${thumbnailUrl}`);
+      const postReq = http.createHttp();
+      try {
+        const postRes = await postReq.request(postUrl, {
+          method: http.RequestMethod.POST,
+          header: this.buildHeaders(session.idToken),
+          extraData: JSON.stringify(postBody),
+          expectDataType: http.HttpDataType.STRING,
+          connectTimeout: 15000,
+          readTimeout: 15000
+        });
+        const postRaw = typeof postRes.result === 'string' ? postRes.result : JSON.stringify(postRes.result);
+        hilog.info(logDomain, logTag, '%{public}s',
+          `Step4 response: url=${postUrl}, status=${postRes.responseCode}, hasUploadUrl=${uploadUrl.length > 0}, body=${this.truncateLog(postRaw)}`);
+        if (postRes.responseCode < 200 || postRes.responseCode >= 300) {
+          throw new Error(`HTTP ${postRes.responseCode}: ${postRaw}`);
+        }
+      } finally {
+        postReq.destroy();
+      }
+
+      // Immediately sync Home Screen Widgets with the newly posted moment
+      let senderName = session.displayName.length > 0 ? session.displayName : 'Bạn';
+      const cachedMe = this.userCache.get(session.localId);
+      if (cachedMe !== undefined) {
+        const fullName = `${cachedMe.firstName} ${cachedMe.lastName}`.trim();
+        if (fullName.length > 0) {
+          senderName = fullName;
+        } else if (cachedMe.username.length > 0) {
+          senderName = cachedMe.username;
+        }
+      }
+      const widgetData: WidgetMomentData = {
+        canonicalUid: md5Value,
+        thumbnailUrl: thumbnailUrl,
+        caption: trimmedCaption,
+        senderName: senderName,
+        createdAtSeconds: nowSec
+      };
+      await SessionManager.getInstance().saveLatestWidgetMoment(widgetData);
+      await SessionManager.getInstance().notifyAllWidgets(widgetData);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      hilog.error(logDomain, logTag, '%{public}s', `uploadAndPostPhotoMoment error: ${this.truncateLog(msg)}`);
+      if (err instanceof Error) {
+        throw err;
+      }
+      throw new Error(msg);
     }
-    const widgetData: WidgetMomentData = {
-      canonicalUid: md5Value,
-      thumbnailUrl: thumbnailUrl,
-      caption: trimmedCaption,
-      senderName: senderName,
-      createdAtSeconds: nowSec
-    };
-    await SessionManager.getInstance().saveLatestWidgetMoment(widgetData);
-    await SessionManager.getInstance().notifyAllWidgets(widgetData);
   }
 
   public async fetchUserByUsername(username: string): Promise<UserProfile | null> {

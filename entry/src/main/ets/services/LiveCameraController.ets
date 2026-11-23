@@ -1,8 +1,12 @@
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { camera, cameraPicker } from '@kit.CameraKit';
+import { camera } from '@kit.CameraKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const CAMERA_LOG_DOMAIN = 0x0000;
+const CAMERA_LOG_TAG = 'LocketCamera';
 
 export class LiveCameraController {
   private cameraManager: camera.CameraManager | null = null;
@@ -19,6 +23,16 @@ export class LiveCameraController {
   private captureTimeoutId: number = -1;
   public currentZoomRatio: number = 1.0;
 
+  private formatBizError(err: BusinessError | Error | Object): string {
+    if (err instanceof Error) {
+      const biz = err as BusinessError;
+      const codeStr = biz.code !== undefined ? `${biz.code}` : 'none';
+      return `code=${codeStr}, message=${err.message}`;
+    }
+    const biz = err as BusinessError;
+    return `code=${biz.code !== undefined ? `${biz.code}` : 'none'}, message=${biz.message ?? String(err)}`;
+  }
+
   public isSessionRunning(): boolean {
     return this.isRunning;
   }
@@ -32,8 +46,9 @@ export class LiveCameraController {
       if (range !== undefined && range.length >= 2) {
         return [range[0], range[1]];
       }
-    } catch (_err) {
-      // Fallback to standard range
+    } catch (err) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `getZoomRange failed: ${this.formatBizError(err as BusinessError)}`);
     }
     return [1.0, 4.0];
   }
@@ -48,8 +63,9 @@ export class LiveCameraController {
     if (this.photoSession !== null && this.isRunning) {
       try {
         this.photoSession.setZoomRatio(rounded);
-      } catch (_err) {
-        // Ignore unsupported zoom hardware error
+      } catch (err) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `setZoomRatio(${rounded}) failed: ${this.formatBizError(err as BusinessError)}`);
       }
     }
     return this.currentZoomRatio;
@@ -60,8 +76,13 @@ export class LiveCameraController {
       const atManager = abilityAccessCtrl.createAtManager();
       const permissions: Array<Permissions> = ['ohos.permission.CAMERA'];
       const result = await atManager.requestPermissionsFromUser(context, permissions);
-      return result.authResults.length > 0 && result.authResults[0] === 0;
-    } catch (_err) {
+      const granted = result.authResults.length > 0 && result.authResults[0] === 0;
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `init: permission result granted=${granted}`);
+      return granted;
+    } catch (err) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `init: requestCameraPermission failed: ${this.formatBizError(err as BusinessError)}`);
       return false;
     }
   }
@@ -117,13 +138,19 @@ export class LiveCameraController {
     surfaceId: string,
     isFront: boolean
   ): Promise<boolean> {
+    hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+      `init: startSession called (isFront=${isFront}, surfaceIdLen=${surfaceId.length})`);
     if (surfaceId.length === 0) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'init: aborted because surfaceId is empty');
       return false;
     }
     await this.release();
 
     const granted = await this.requestCameraPermission(context);
     if (!granted) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'init: camera permission denied');
       return false;
     }
 
@@ -131,17 +158,27 @@ export class LiveCameraController {
       const manager = camera.getCameraManager(context);
       this.cameraManager = manager;
       const cameras = manager.getSupportedCameras();
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `init: supportedCameras count=${cameras.length}`);
       const device = this.selectCameraDevice(cameras, isFront);
       if (device === null) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          'init: no camera device found');
         return false;
       }
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `init: selected cameraId=${device.cameraId}, position=${device.cameraPosition}`);
 
       const capability = manager.getSupportedOutputCapability(device, camera.SceneMode.NORMAL_PHOTO);
       const previewProfile = this.selectPreviewProfile(capability.previewProfiles);
       const photoProfile = this.selectPhotoProfile(capability.photoProfiles);
       if (previewProfile === null || photoProfile === null) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `init: missing profile (preview=${previewProfile !== null}, photo=${photoProfile !== null})`);
         return false;
       }
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `session config: preview=${previewProfile.size.width}x${previewProfile.size.height}, photo=${photoProfile.size.width}x${photoProfile.size.height}, photoFormat=${photoProfile.format}`);
 
       const previewOut = manager.createPreviewOutput(previewProfile, surfaceId);
       const photoOut = manager.createPhotoOutput(photoProfile);
@@ -156,19 +193,27 @@ export class LiveCameraController {
       this.cameraInput = input;
       this.photoSession = session;
 
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'session config: opening cameraInput and committing session config');
       await input.open();
       session.beginConfig();
       session.addInput(input);
       session.addOutput(previewOut);
       session.addOutput(photoOut);
       await session.commitConfig();
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'start: commitConfig succeeded, starting photoSession');
       await session.start();
 
       this.currentIsFront = isFront;
       this.isRunning = true;
       this.currentZoomRatio = 1.0;
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `start: photoSession started successfully (isFront=${isFront})`);
       return true;
-    } catch (_err) {
+    } catch (err) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `startSession failed: ${this.formatBizError(err as BusinessError)}`);
       await this.release();
       return false;
     }
@@ -219,37 +264,53 @@ export class LiveCameraController {
   }
 
   private handlePhotoAvailable(err: BusinessError, photo: camera.Photo): void {
+    hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+      `photoAvailable received (hasErr=${err !== undefined && err !== null && err.code !== 0})`);
     if (err !== undefined && err !== null && err.code !== 0) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `photoAvailable callback error: code=${err.code}, message=${err.message ?? ''}`);
       this.releasePhotoResources(null, photo ?? null);
-      this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${err.message ?? 'Không thể chụp ảnh'}`);
+      this.rejectPendingCapture(`${err.message ?? 'Không thể chụp ảnh'} (code: ${err.code})`);
       return;
     }
     if (photo === undefined || photo === null) {
-      this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Không thể đọc dữ liệu ảnh');
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'photoAvailable error: photo object is null/undefined');
+      this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
       return;
     }
     const mainImage = photo.main;
     if (mainImage === undefined || mainImage === null) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'photoAvailable error: photo.main is null/undefined');
       this.releasePhotoResources(null, photo);
-      this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Không thể đọc dữ liệu ảnh');
+      this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
       return;
     }
     const ctx = this.pendingCaptureContext;
     if (ctx === null) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'photoAvailable ignored: pendingCaptureContext is null');
       this.releasePhotoResources(mainImage, photo);
       return;
     }
 
     try {
+      hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'image read: calling mainImage.getComponent(JPEG)');
       mainImage.getComponent(image.ComponentType.JPEG, (compErr: BusinessError, component: image.Component) => {
         try {
           if (compErr !== undefined && compErr !== null && compErr.code !== 0) {
-            this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${compErr.message ?? 'Không thể đọc dữ liệu ảnh'}`);
+            hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+              `image read getComponent error: code=${compErr.code}, message=${compErr.message ?? ''}`);
+            this.rejectPendingCapture(`${compErr.message ?? 'Không thể đọc dữ liệu ảnh'} (code: ${compErr.code})`);
             return;
           }
           if (component === undefined || component === null ||
             component.byteBuffer === undefined || component.byteBuffer.byteLength === 0) {
-            this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Không thể đọc dữ liệu ảnh');
+            hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+              'image read error: empty JPEG byteBuffer');
+            this.rejectPendingCapture('Không thể đọc dữ liệu ảnh');
             return;
           }
           const copied = new Uint8Array(component.byteBuffer).slice().buffer;
@@ -260,26 +321,38 @@ export class LiveCameraController {
           } finally {
             fileIo.closeSync(file);
           }
+          hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+            `image read success: bytes=${copied.byteLength}, filePath=${filePath}`);
           this.resolvePendingCapture(filePath);
         } catch (writeErr) {
+          hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+            `image read/write failed: ${this.formatBizError(writeErr as BusinessError)}`);
           const msg = writeErr instanceof Error ? writeErr.message : 'Lưu ảnh thất bại';
-          this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${msg}`);
+          this.rejectPendingCapture(msg);
         } finally {
           this.releasePhotoResources(mainImage, photo);
         }
       });
     } catch (e) {
       this.releasePhotoResources(mainImage, photo);
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        `image read exception: ${this.formatBizError(e as BusinessError)}`);
       const msg = e instanceof Error ? e.message : 'Không thể đọc dữ liệu ảnh';
-      this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${msg}`);
+      this.rejectPendingCapture(msg);
     }
   }
 
   public async capturePhotoToFile(context: common.UIAbilityContext): Promise<string> {
+    hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+      `capture called: isRunning=${this.isRunning}, isCapturing=${this.isCapturing}, isFront=${this.currentIsFront}`);
     if (this.photoOutput === null || !this.isRunning) {
-      throw new Error('CAMERA_CAPTURE_FALLBACK_REQUIRED: Camera chưa sẵn sàng');
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'capture error: camera session is not ready');
+      throw new Error('Camera chưa sẵn sàng');
     }
     if (this.isCapturing) {
+      hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+        'capture error: capture already in progress');
       throw new Error('Đang chụp ảnh...');
     }
     this.isCapturing = true;
@@ -290,88 +363,106 @@ export class LiveCameraController {
       this.pendingResolve = resolve;
       this.pendingReject = reject;
       this.captureTimeoutId = setTimeout(() => {
-        this.rejectPendingCapture('CAMERA_CAPTURE_FALLBACK_REQUIRED: Chụp ảnh quá thời gian chờ');
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          'capture timeout after 10000ms');
+        this.rejectPendingCapture('Chụp ảnh quá thời gian chờ');
       }, 10000);
 
+      const setting: camera.PhotoCaptureSetting = {
+        quality: camera.QualityLevel.QUALITY_LEVEL_HIGH,
+        rotation: camera.ImageRotation.ROTATION_0
+      };
+      let mirrorSupported = false;
       try {
-        const setting: camera.PhotoCaptureSetting = {
-          quality: camera.QualityLevel.QUALITY_LEVEL_HIGH,
-          rotation: camera.ImageRotation.ROTATION_0,
-          mirror: this.currentIsFront
-        };
-        output.capture(setting).catch((capErr: BusinessError) => {
-          this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${capErr.message ?? 'Chụp ảnh thất bại'}`);
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Lỗi camera';
-        this.rejectPendingCapture(`CAMERA_CAPTURE_FALLBACK_REQUIRED: ${msg}`);
+        mirrorSupported = output.isMirrorSupported();
+        hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `capture called: isMirrorSupported=${mirrorSupported}`);
+      } catch (mirrorErr) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `capture: isMirrorSupported error: ${this.formatBizError(mirrorErr as BusinessError)}`);
       }
+      if (mirrorSupported) {
+        setting.mirror = this.currentIsFront;
+      }
+
+      const executeCapture = async (): Promise<void> => {
+        try {
+          hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+            `capture called: invoking photoOutput.capture(setting) mirror=${setting.mirror !== undefined ? String(setting.mirror) : 'omitted'}`);
+          await output.capture(setting);
+        } catch (capErr) {
+          hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+            `capture(setting) failed: ${this.formatBizError(capErr as BusinessError)}; retrying photoOutput.capture() without args`);
+          await output.capture();
+        }
+      };
+
+      executeCapture().catch((retryErr: BusinessError) => {
+        const code = retryErr?.code ?? -1;
+        const msg = retryErr?.message ?? 'Chụp ảnh thất bại';
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `capture() retry failed: code=${code}, message=${msg}`);
+        this.rejectPendingCapture(`${msg} (code: ${code})`);
+      });
     });
   }
 
-  public async pickPhotoWithSystemCamera(context: common.UIAbilityContext, isFront: boolean): Promise<string> {
-    await this.release();
-    const pickerProfile: cameraPicker.PickerProfile = {
-      cameraPosition: isFront
-        ? camera.CameraPosition.CAMERA_POSITION_FRONT
-        : camera.CameraPosition.CAMERA_POSITION_BACK
-    };
-    const pickerResult: cameraPicker.PickerResult = await cameraPicker.pick(
-      context,
-      [cameraPicker.PickerMediaType.PHOTO],
-      pickerProfile
-    );
-    if (pickerResult.resultCode === 0 && pickerResult.resultUri.length > 0) {
-      return pickerResult.resultUri;
-    }
-    return '';
-  }
-
   public async release(): Promise<void> {
+    hilog.info(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s', 'release: stopping camera session');
     this.isRunning = false;
-    this.rejectPendingCapture('Camera đã đóng');
+    if (this.pendingReject !== null || this.isCapturing) {
+      this.rejectPendingCapture('Camera đã đóng');
+    } else {
+      this.clearPendingCapture();
+    }
     this.currentZoomRatio = 1.0;
     if (this.photoOutput !== null) {
       try {
         this.photoOutput.off('photoAvailable');
-      } catch (_err) {
-        // Ignore
+      } catch (err) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `release photoOutput.off error: ${this.formatBizError(err as BusinessError)}`);
       }
     }
     if (this.photoSession !== null) {
       try {
         await this.photoSession.stop();
-      } catch (_err) {
-        // Ignore
+      } catch (err) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `release photoSession.stop error: ${this.formatBizError(err as BusinessError)}`);
       }
       try {
         await this.photoSession.release();
-      } catch (_err) {
-        // Ignore
+      } catch (err) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `release photoSession.release error: ${this.formatBizError(err as BusinessError)}`);
       }
       this.photoSession = null;
     }
     if (this.cameraInput !== null) {
       try {
         await this.cameraInput.close();
-      } catch (_err) {
-        // Ignore
+      } catch (err) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `release cameraInput.close error: ${this.formatBizError(err as BusinessError)}`);
       }
       this.cameraInput = null;
     }
     if (this.previewOutput !== null) {
       try {
         await this.previewOutput.release();
-      } catch (_err) {
-        // Ignore
+      } catch (err) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `release previewOutput.release error: ${this.formatBizError(err as BusinessError)}`);
       }
       this.previewOutput = null;
     }
     if (this.photoOutput !== null) {
       try {
         await this.photoOutput.release();
-      } catch (_err) {
-        // Ignore
+      } catch (err) {
+        hilog.error(CAMERA_LOG_DOMAIN, CAMERA_LOG_TAG, '%{public}s',
+          `release photoOutput.release error: ${this.formatBizError(err as BusinessError)}`);
       }
       this.photoOutput = null;
     }

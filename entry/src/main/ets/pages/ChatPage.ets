@@ -313,7 +313,17 @@ struct ChatPage {
         .scrollBar(BarState.Off)
       }
 
-      // Top-down Progressive Frosted Blur Header Overlay
+      // Top-down Smooth 4-stop Gradient Scrim (no full-width backdropBlur)
+      Column()
+        .width('100%')
+        .height(this.safeTopVp + 76)
+        .hitTestBehavior(HitTestMode.Transparent)
+        .linearGradient({
+          direction: GradientDirection.Bottom,
+          colors: [['#F5000000', 0], ['#CC000000', 0.45], ['#59000000', 0.78], ['#00000000', 1]]
+        })
+
+      // Header Controls Row (backdropBlur only on circular pills)
       Row() {
         Column() {
           Image($r('app.media.ic_back'))
@@ -323,7 +333,8 @@ struct ChatPage {
         }
         .width(42)
         .height(42)
-        .backgroundColor('#1C1C1E')
+        .backgroundColor('#CC1C1C1E')
+        .backdropBlur(16)
         .borderRadius(21)
         .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
         .scale(this.pressedButtonId === 'chat_back' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
@@ -376,7 +387,8 @@ struct ChatPage {
         }
         .width(40)
         .height(40)
-        .backgroundColor('#1C1C1E')
+        .backgroundColor('#CC1C1C1E')
+        .backdropBlur(16)
         .borderRadius(20)
         .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
         .scale(this.pressedButtonId === 'chat_refresh' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
@@ -389,14 +401,10 @@ struct ChatPage {
         })
       }
       .width('100%')
-      .padding({ top: this.safeTopVp + 8, bottom: 22, left: 16, right: 16 })
-      .backdropBlur(24)
-      .linearGradient({
-        direction: GradientDirection.Bottom,
-        colors: [['#EB000000', 0.0], ['#B3000000', 0.55], ['#00000000', 1.0]]
-      })
+      .padding({ top: this.safeTopVp + 8, bottom: 14, left: 16, right: 16 })
+      .hitTestBehavior(HitTestMode.Transparent)
 
-      // Bottom-up Fade + Frosted Composer Overlay (Aligned at Bottom, pass-through above composer)
+      // Bottom-up Smooth 4-stop Fade + Frosted Pill Composer Overlay
       Column() {
         Column() {
           Row({ space: 6 }) {
@@ -499,17 +507,18 @@ struct ChatPage {
           .width('100%')
           .height(56)
           .padding({ left: 10, right: 10 })
-          .backgroundColor('#E61C1C1E')
+          .backgroundColor('#CC1C1C1E')
+          .backdropBlur(16)
           .borderRadius(28)
           .border({ width: 1, color: '#2E2E30' })
           .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 18, bottom: this.safeBottomVp + 14 })
-        .backdropBlur(18)
+        .padding({ left: 16, right: 16, top: 24, bottom: this.safeBottomVp + 14 })
+        .hitTestBehavior(HitTestMode.Transparent)
         .linearGradient({
           direction: GradientDirection.Top,
-          colors: [['#F0000000', 0.0], ['#A6000000', 0.56], ['#00000000', 1.0]]
+          colors: [['#F5000000', 0], ['#CC000000', 0.45], ['#59000000', 0.78], ['#00000000', 1]]
         })
       }
       .width('100%')

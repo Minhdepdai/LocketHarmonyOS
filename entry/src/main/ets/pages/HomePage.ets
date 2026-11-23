@@ -1,6 +1,7 @@
 import { curves, promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   ConversationSummary,
   FriendItem,
@@ -276,28 +277,27 @@ struct HomePage {
     if (this.isCapturing) {
       return;
     }
+    const logDomain = 0x0000;
+    const logTag = 'LocketCamera';
     const context = getContext(this) as common.UIAbilityContext;
     if (!this.isCameraReady) {
+      hilog.info(logDomain, logTag, '%{public}s', 'HomePage handleShutterCapture: starting live camera first');
       await this.startLiveCamera();
+    }
+    if (!this.isCameraReady) {
+      hilog.error(logDomain, logTag, '%{public}s', 'HomePage handleShutterCapture: camera session not ready');
+      promptAction.showToast({ message: 'Camera chưa sẵn sàng, vui lòng thử lại' });
+      return;
     }
     this.isCapturing = true;
     try {
-      let filePath = '';
-      if (this.isCameraReady) {
-        try {
-          filePath = await this.liveCamera.capturePhotoToFile(context);
-          await this.stopLiveCamera();
-        } catch (_captureErr) {
-          this.isCameraReady = false;
-          this.zoomRatio = 1.0;
-          filePath = await this.liveCamera.pickPhotoWithSystemCamera(context, this.isFrontCamera);
-        }
-      } else {
-        filePath = await this.liveCamera.pickPhotoWithSystemCamera(context, this.isFrontCamera);
-      }
+      hilog.info(logDomain, logTag, '%{public}s', 'HomePage handleShutterCapture: capturing photo in-app');
+      const filePath = await this.liveCamera.capturePhotoToFile(context);
+      await this.stopLiveCamera();
 
       if (filePath.length === 0) {
         this.isCapturing = false;
+        promptAction.showToast({ message: 'Không thể đọc dữ liệu ảnh' });
         if (this.viewMode === 'camera' && this.cameraSurfaceId.length > 0) {
           this.startLiveCamera();
         }
@@ -336,8 +336,11 @@ struct HomePage {
     } catch (err) {
       this.isCapturing = false;
       const msg = err instanceof Error ? err.message : 'Không thể chụp ảnh';
+      hilog.error(logDomain, logTag, '%{public}s', `HomePage handleShutterCapture error: ${msg}`);
       promptAction.showToast({ message: msg });
-      if (this.viewMode === 'camera' && this.cameraSurfaceId.length > 0) {
+      if (this.viewMode === 'camera' && this.cameraSurfaceId.length > 0 && !this.liveCamera.isSessionRunning()) {
+        this.isCameraReady = false;
+        this.zoomRatio = 1.0;
         this.startLiveCamera();
       }
     }
@@ -942,77 +945,10 @@ struct HomePage {
       })
 
       Blank()
-
-      // Bottom floating pill nav (height 58, borderRadius 29, icons 24x24)
-      Row({ space: 8 }) {
-        // Grid / Calendar icon
-        Column() {
-          Image($r('app.media.ic_grid'))
-            .width(24)
-            .height(24)
-            .fillColor('#8E8E93')
-        }
-        .width(56)
-        .height(44)
-        .borderRadius(22)
-        .scale(this.pressedButtonId === 'cam_tab_grid' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('cam_tab_grid', e);
-        })
-        .onClick(() => {
-          this.switchViewMode('grid');
-        })
-
-        // Home highlighted pill
-        Column() {
-          Image($r('app.media.ic_home'))
-            .width(24)
-            .height(24)
-            .fillColor('#FFFFFF')
-        }
-        .width(68)
-        .height(44)
-        .borderRadius(22)
-        .backgroundColor('#262628')
-        .scale(this.pressedButtonId === 'cam_tab_home' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('cam_tab_home', e);
-        })
-        .onClick(() => {
-          this.switchViewMode('camera');
-        })
-
-        // Chat icon -> Messages tab
-        Column() {
-          Image($r('app.media.ic_chat'))
-            .width(24)
-            .height(24)
-            .fillColor('#8E8E93')
-        }
-        .width(56)
-        .height(44)
-        .borderRadius(22)
-        .scale(this.pressedButtonId === 'cam_tab_chat' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('cam_tab_chat', e);
-        })
-        .onClick(() => {
-          this.switchViewMode('messages');
-        })
-      }
-      .height(58)
-      .padding({ left: 8, right: 8 })
-      .borderRadius(29)
-      .backgroundColor('#141416')
-      .border({ width: 1, color: '#2E2E30' })
-      .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-      .margin({ bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
+    .padding({ bottom: 72 })
     .alignItems(HorizontalAlign.Center)
     .transition(this.buildDirectionalTransition())
   }
@@ -1308,129 +1244,10 @@ struct HomePage {
         .border({ width: 1, color: '#2E2E30' })
         .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
       }
-
-      // Bottom Controls Row (side circles 52x52, center pill height 58, icons 24x24)
-      Row() {
-        // Left 52x52 circle: 4-squares Grid icon
-        Column() {
-          Image($r('app.media.ic_grid'))
-            .width(24)
-            .height(24)
-            .fillColor('#FFFFFF')
-        }
-        .width(52)
-        .height(52)
-        .borderRadius(26)
-        .backgroundColor('#1A1A1C')
-        .border({ width: 1, color: '#2E2E30' })
-        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-        .scale(this.pressedButtonId === 'feed_grid_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('feed_grid_btn', e);
-        })
-        .onClick(() => {
-          this.switchViewMode('grid');
-        })
-
-        Blank()
-
-        // Center pill (height 58, radius 29): Calendar | 42x42 mini shutter | Chat
-        Row({ space: 20 }) {
-          Image($r('app.media.ic_calendar'))
-            .width(24)
-            .height(24)
-            .fillColor('#FFFFFF')
-            .scale(this.pressedButtonId === 'feed_pill_cal' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-            .onTouch((e: TouchEvent) => {
-              this.handleButtonTouch('feed_pill_cal', e);
-            })
-            .onClick(() => {
-              this.switchViewMode('grid');
-            })
-
-          Stack({ alignContent: Alignment.Center }) {
-            Column()
-              .width(42)
-              .height(42)
-              .borderRadius(21)
-              .backgroundColor('#000000')
-              .border({ width: 3.5, color: '#FFB800' })
-              .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
-            Column()
-              .width(32)
-              .height(32)
-              .borderRadius(16)
-              .backgroundColor('#FFFFFF')
-          }
-          .scale(this.pressedButtonId === 'feed_pill_cam' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-          .onTouch((e: TouchEvent) => {
-            this.handleButtonTouch('feed_pill_cam', e);
-          })
-          .onClick(() => {
-            this.switchViewMode('camera');
-          })
-
-          Image($r('app.media.ic_chat'))
-            .width(24)
-            .height(24)
-            .fillColor('#FFFFFF')
-            .scale(this.pressedButtonId === 'feed_pill_chat' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-            .onTouch((e: TouchEvent) => {
-              this.handleButtonTouch('feed_pill_chat', e);
-            })
-            .onClick(() => {
-              this.switchViewMode('messages');
-            })
-        }
-        .height(58)
-        .padding({ left: 22, right: 22 })
-        .borderRadius(29)
-        .backgroundColor('#1A1A1C')
-        .border({ width: 1, color: '#2E2E30' })
-        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-
-        Blank()
-
-        // Right 52x52 circle: Share/Delete icon
-        Column() {
-          if (this.isOwnMoment(this.getCurrentMoment())) {
-            Image($r('app.media.ic_trash'))
-              .width(24)
-              .height(24)
-              .fillColor('#FF453A')
-          } else {
-            Image($r('app.media.ic_share'))
-              .width(24)
-              .height(24)
-              .fillColor('#FFFFFF')
-          }
-        }
-        .width(52)
-        .height(52)
-        .borderRadius(26)
-        .backgroundColor('#1A1A1C')
-        .border({ width: 1, color: '#2E2E30' })
-        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-        .scale(this.pressedButtonId === 'feed_action_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('feed_action_btn', e);
-        })
-        .onClick(() => {
-          const current = this.getCurrentMoment();
-          if (current !== null && this.isOwnMoment(current)) {
-            this.handleDeleteMoment(current.canonicalUid);
-          } else {
-            promptAction.showToast({ message: 'Đã chia sẻ khoảnh khắc Locket' });
-          }
-        })
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
+    .padding({ bottom: 76 })
     .alignItems(HorizontalAlign.Center)
     .transition(this.buildDirectionalTransition())
   }
@@ -1483,73 +1300,15 @@ struct HomePage {
         .scrollBar(BarState.Off)
       }
 
-      // Bottom-up Progressive Frosted Blur Scrim behind floating pill
+      // Bottom-up Smooth 4-stop Gradient Scrim behind stationary bottom pill (no full-width backdropBlur)
       Column()
         .width('100%')
         .height(this.safeBottomVp + 108)
         .hitTestBehavior(HitTestMode.Transparent)
-        .backdropBlur(22)
         .linearGradient({
           direction: GradientDirection.Top,
-          colors: [['#F0000000', 0.0], ['#A6000000', 0.52], ['#00000000', 1.0]]
+          colors: [['#F5000000', 0], ['#CC000000', 0.45], ['#59000000', 0.78], ['#00000000', 1]]
         })
-
-      // Floating bottom center pill overlay (#CC1C1C1E, height 58, radius 29, icons 24x24)
-      Row({ space: 22 }) {
-        Image($r('app.media.ic_grid'))
-          .width(24)
-          .height(24)
-          .fillColor('#FFB800')
-          .scale(this.pressedButtonId === 'grid_tab_grid' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-          .onTouch((e: TouchEvent) => {
-            this.handleButtonTouch('grid_tab_grid', e);
-          })
-          .onClick(() => {
-            this.switchViewMode('grid');
-          })
-
-        Stack({ alignContent: Alignment.Center }) {
-          Column()
-            .width(42)
-            .height(42)
-            .borderRadius(21)
-            .backgroundColor('#000000')
-            .border({ width: 3.5, color: '#FFB800' })
-            .shadow({ radius: 24, color: '#73FFB800', offsetX: 0, offsetY: 5 })
-          Column()
-            .width(32)
-            .height(32)
-            .borderRadius(16)
-            .backgroundColor('#FFFFFF')
-        }
-        .scale(this.pressedButtonId === 'grid_tab_cam' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('grid_tab_cam', e);
-        })
-        .onClick(() => {
-          this.switchViewMode('camera');
-        })
-
-        Image($r('app.media.ic_chat'))
-          .width(24)
-          .height(24)
-          .fillColor('#FFFFFF')
-          .scale(this.pressedButtonId === 'grid_tab_chat' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-          .onTouch((e: TouchEvent) => {
-            this.handleButtonTouch('grid_tab_chat', e);
-          })
-          .onClick(() => {
-            this.switchViewMode('messages');
-          })
-      }
-      .height(58)
-      .padding({ left: 22, right: 22 })
-      .borderRadius(29)
-      .backgroundColor('#CC1C1C1E')
-      .backdropBlur(20)
-      .border({ width: 1, color: '#2E2E30' })
-      .shadow({ radius: 20, color: '#80000000', offsetX: 0, offsetY: 6 })
-      .margin({ bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
@@ -1744,76 +1503,195 @@ struct HomePage {
       }
       .width('100%')
       .height('100%')
-
-      // Bottom bar: clean centered 3-icon floating pill (height 58, borderRadius 29, icons 24x24)
-      Row({ space: 8 }) {
-        Column() {
-          Image($r('app.media.ic_grid'))
-            .width(24)
-            .height(24)
-            .fillColor('#8E8E93')
-        }
-        .width(56)
-        .height(44)
-        .borderRadius(22)
-        .scale(this.pressedButtonId === 'msg_tab_grid' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('msg_tab_grid', e);
-        })
-        .onClick(() => {
-          this.switchViewMode('grid');
-        })
-
-        Column() {
-          Image($r('app.media.ic_home'))
-            .width(24)
-            .height(24)
-            .fillColor('#8E8E93')
-        }
-        .width(56)
-        .height(44)
-        .borderRadius(22)
-        .scale(this.pressedButtonId === 'msg_tab_home' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('msg_tab_home', e);
-        })
-        .onClick(() => {
-          this.switchViewMode('camera');
-        })
-
-        // Highlighted Chat pill
-        Column() {
-          Image($r('app.media.ic_chat'))
-            .width(24)
-            .height(24)
-            .fillColor('#FFFFFF')
-        }
-        .width(68)
-        .height(44)
-        .borderRadius(22)
-        .backgroundColor('#262628')
-        .scale(this.pressedButtonId === 'msg_tab_chat' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
-        .justifyContent(FlexAlign.Center)
-        .onTouch((e: TouchEvent) => {
-          this.handleButtonTouch('msg_tab_chat', e);
-        })
-        .onClick(() => {
-          this.loadMessagesTab();
-        })
-      }
-      .height(58)
-      .padding({ left: 8, right: 8 })
-      .borderRadius(29)
-      .backgroundColor('#141416')
-      .border({ width: 1, color: '#2E2E30' })
-      .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
-      .margin({ bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
     .transition(this.buildDirectionalTransition())
+  }
+
+  @Builder
+  private buildStationaryBottomNav() {
+    Column() {
+      Row() {
+        // Left 52x52 circle (Grid shortcut in feed mode; fades without shifting center pill)
+        Column() {
+          Image($r('app.media.ic_grid'))
+            .width(24)
+            .height(24)
+            .fillColor('#FFFFFF')
+        }
+        .width(52)
+        .height(52)
+        .borderRadius(26)
+        .backgroundColor('#CC1A1A1C')
+        .backdropBlur(16)
+        .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .opacity(this.viewMode === 'feed' ? 1 : 0)
+        .scale(this.pressedButtonId === 'feed_grid_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+        .animation({ duration: 220, curve: Curve.EaseOut })
+        .hitTestBehavior(this.viewMode === 'feed' ? HitTestMode.Default : HitTestMode.None)
+        .justifyContent(FlexAlign.Center)
+        .onTouch((e: TouchEvent) => {
+          if (this.viewMode === 'feed') {
+            this.handleButtonTouch('feed_grid_btn', e);
+          }
+        })
+        .onClick(() => {
+          if (this.viewMode === 'feed') {
+            this.switchViewMode('grid');
+          }
+        })
+
+        Blank()
+
+        // Stationary 3-button floating pill (height 58, borderRadius 29, fixed slot widths)
+        Row({ space: 8 }) {
+          // Tab 0: Grid / History
+          Column() {
+            Image($r('app.media.ic_grid'))
+              .width(24)
+              .height(24)
+              .fillColor(this.viewMode === 'grid' ? '#FFB800' : '#8E8E93')
+          }
+          .width(60)
+          .height(44)
+          .borderRadius(22)
+          .backgroundColor(this.viewMode === 'grid' ? '#262628' : Color.Transparent)
+          .scale(this.pressedButtonId === 'nav_tab_grid' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+          .animation({ duration: 220, curve: Curve.EaseOut })
+          .justifyContent(FlexAlign.Center)
+          .onTouch((e: TouchEvent) => {
+            this.handleButtonTouch('nav_tab_grid', e);
+          })
+          .onClick(() => {
+            this.switchViewMode('grid');
+          })
+
+          // Tab 1: Home / Camera
+          Column() {
+            if (this.viewMode === 'feed' || this.viewMode === 'grid') {
+              Stack({ alignContent: Alignment.Center }) {
+                Column()
+                  .width(36)
+                  .height(36)
+                  .borderRadius(18)
+                  .backgroundColor('#000000')
+                  .border({ width: 3, color: '#FFB800' })
+                  .shadow({ radius: 14, color: '#66FFB800', offsetX: 0, offsetY: 2 })
+                Column()
+                  .width(26)
+                  .height(26)
+                  .borderRadius(13)
+                  .backgroundColor('#FFFFFF')
+              }
+            } else {
+              Image($r('app.media.ic_home'))
+                .width(24)
+                .height(24)
+                .fillColor(this.viewMode === 'camera' ? '#FFFFFF' : '#8E8E93')
+            }
+          }
+          .width(60)
+          .height(44)
+          .borderRadius(22)
+          .backgroundColor(this.viewMode === 'camera' ? '#262628' : Color.Transparent)
+          .scale(this.pressedButtonId === 'nav_tab_home' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+          .animation({ duration: 220, curve: Curve.EaseOut })
+          .justifyContent(FlexAlign.Center)
+          .onTouch((e: TouchEvent) => {
+            this.handleButtonTouch('nav_tab_home', e);
+          })
+          .onClick(() => {
+            this.switchViewMode('camera');
+          })
+
+          // Tab 2: Messages
+          Column() {
+            Image($r('app.media.ic_chat'))
+              .width(24)
+              .height(24)
+              .fillColor(this.viewMode === 'messages' ? '#FFFFFF' : '#8E8E93')
+          }
+          .width(60)
+          .height(44)
+          .borderRadius(22)
+          .backgroundColor(this.viewMode === 'messages' ? '#262628' : Color.Transparent)
+          .scale(this.pressedButtonId === 'nav_tab_chat' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+          .animation({ duration: 220, curve: Curve.EaseOut })
+          .justifyContent(FlexAlign.Center)
+          .onTouch((e: TouchEvent) => {
+            this.handleButtonTouch('nav_tab_chat', e);
+          })
+          .onClick(() => {
+            if (this.viewMode === 'messages') {
+              this.loadMessagesTab();
+            } else {
+              this.switchViewMode('messages');
+            }
+          })
+        }
+        .height(58)
+        .padding({ left: 8, right: 8 })
+        .borderRadius(29)
+        .backgroundColor('#CC141416')
+        .backdropBlur(16)
+        .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 18, color: '#66000000', offsetX: 0, offsetY: 5 })
+
+        Blank()
+
+        // Right 52x52 circle (Share / Delete in feed mode; fades without shifting center pill)
+        Column() {
+          if (this.isOwnMoment(this.getCurrentMoment())) {
+            Image($r('app.media.ic_trash'))
+              .width(24)
+              .height(24)
+              .fillColor('#FF453A')
+          } else {
+            Image($r('app.media.ic_share'))
+              .width(24)
+              .height(24)
+              .fillColor('#FFFFFF')
+          }
+        }
+        .width(52)
+        .height(52)
+        .borderRadius(26)
+        .backgroundColor('#CC1A1A1C')
+        .backdropBlur(16)
+        .border({ width: 1, color: '#2E2E30' })
+        .shadow({ radius: 14, color: '#59000000', offsetX: 0, offsetY: 4 })
+        .opacity(this.viewMode === 'feed' ? 1 : 0)
+        .scale(this.pressedButtonId === 'feed_action_btn' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
+        .animation({ duration: 220, curve: Curve.EaseOut })
+        .hitTestBehavior(this.viewMode === 'feed' ? HitTestMode.Default : HitTestMode.None)
+        .justifyContent(FlexAlign.Center)
+        .onTouch((e: TouchEvent) => {
+          if (this.viewMode === 'feed') {
+            this.handleButtonTouch('feed_action_btn', e);
+          }
+        })
+        .onClick(() => {
+          if (this.viewMode !== 'feed') {
+            return;
+          }
+          const current = this.getCurrentMoment();
+          if (current !== null && this.isOwnMoment(current)) {
+            this.handleDeleteMoment(current.canonicalUid);
+          } else {
+            promptAction.showToast({ message: 'Đã chia sẻ khoảnh khắc Locket' });
+          }
+        })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: this.safeBottomVp + 8 })
+      .hitTestBehavior(HitTestMode.Transparent)
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.End)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   @Builder
@@ -1978,6 +1856,9 @@ struct HomePage {
       .width('100%')
       .height('100%')
       .padding({ top: this.safeTopVp, bottom: this.safeBottomVp })
+
+      // Stationary bottom 3-button nav layer (never slides with tabs)
+      this.buildStationaryBottomNav()
 
       if (this.showFriendFilter && (this.viewMode === 'feed' || this.viewMode === 'grid')) {
         this.buildFriendFilterSheet()
