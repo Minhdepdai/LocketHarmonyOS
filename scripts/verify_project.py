@@ -250,6 +250,37 @@ def check_no_hardcoded_credentials(errors: list) -> None:
     print(f"[CHECK 5] Scanned {scanned} text files for hardcoded credentials/tokens.")
 
 
+def check_ets_media_references(errors: list) -> None:
+    ets_root = ROOT / "entry" / "src" / "main" / "ets"
+    media_dirs = [
+        ROOT / "entry" / "src" / "main" / "resources" / "base" / "media",
+        ROOT / "AppScope" / "resources" / "base" / "media",
+    ]
+    valid_exts = (".png", ".svg", ".json")
+    media_ref_re = re.compile(r"\$r\(\s*['\"]app\.media\.([A-Za-z0-9_]+)['\"]\s*\)")
+
+    ets_count = 0
+    ref_count = 0
+    if ets_root.is_dir():
+        for ets_file in ets_root.rglob("*.ets"):
+            ets_count += 1
+            content = ets_file.read_text(encoding="utf-8", errors="ignore")
+            for m in media_ref_re.finditer(content):
+                ref_count += 1
+                res_name = m.group(1)
+                found = any(
+                    (mdir / f"{res_name}{ext}").is_file()
+                    for mdir in media_dirs
+                    for ext in valid_exts
+                )
+                if not found:
+                    errors.append(
+                        f"Missing media asset for $r('app.media.{res_name}') in {ets_file.relative_to(ROOT)}"
+                    )
+
+    print(f"[CHECK 6] Verified {ref_count} $r('app.media.*') references across {ets_count} .ets files.")
+
+
 def main() -> int:
     errors: list[str] = []
     check_json_files(errors)
@@ -257,6 +288,7 @@ def main() -> int:
     check_pages_and_widgets(errors)
     check_png_files(errors)
     check_no_hardcoded_credentials(errors)
+    check_ets_media_references(errors)
 
     if errors:
         print("\nVERIFICATION FAILED:")

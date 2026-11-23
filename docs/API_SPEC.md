@@ -290,18 +290,20 @@ Authorization: Bearer <idToken>
 
 ---
 
-## 8. Upload Photo & Post Moment (`Firebase Storage` + `postMomentV2`)
+## 8. Upload Photo & Post Moment (`Firebase Storage Resumable` + `postMomentV2`)
 
-Quy trình đăng khoảnh khắc mới gồm 3 bước:
+Quy trình đăng khoảnh khắc mới gồm 4 bước theo đúng giao thức Firebase Storage Resumable Upload của Locket iOS:
 
-### Bước 1: Khởi tạo phiên upload ảnh lên Firebase Storage
+### Bước 1: Khởi tạo phiên Resumable Upload (`start`)
 - **POST** `https://firebasestorage.googleapis.com/v0/b/locket-img/o/users%2F{uid}%2Fmoments%2Fthumbnails%2F{filename}.webp?uploadType=resumable&name=users%2F{uid}%2Fmoments%2Fthumbnails%2F{filename}.webp`
 - **Headers:**
 ```http
 Authorization: Firebase <idToken>
 Content-Type: application/json; charset=UTF-8
-X-Upload-Content-Type: image/webp
-X-Upload-Content-Length: <byte_length>
+x-goog-upload-protocol: resumable
+x-goog-upload-command: start
+x-goog-upload-header-content-length: <byte_length>
+x-goog-upload-header-content-type: image/webp
 ```
 - **Body:**
 ```json
@@ -315,15 +317,30 @@ X-Upload-Content-Length: <byte_length>
   }
 }
 ```
-- **Response `200`:** Trả về header `X-Goog-Upload-URL` (đường dẫn upload dữ liệu nhị phân).
+- **Response `200`:** Trả về header `x-goog-upload-url` (đường dẫn phiên upload resumable).
 
-### Bước 2: Tải dữ liệu ảnh (PUT) & Lấy Download URL
-- **PUT** `<X-Goog-Upload-URL>` với raw binary bytes của ảnh (`image/webp` hoặc `image/jpeg`).
-- **Response `200`:** Trả về JSON chứa `downloadTokens` (hoặc gọi `GET` metadata đối tượng để lấy token).
+### Bước 2: Tải dữ liệu nhị phân & Hoàn tất (`upload, finalize`)
+- **PUT** `<x-goog-upload-url>`
+- **Headers:**
+```http
+Content-Type: application/octet-stream
+x-goog-upload-offset: 0
+x-goog-upload-command: upload, finalize
+```
+- **Body:** Raw binary bytes của ảnh (`image/webp` hoặc `image/jpeg`).
+- **Response `200`:** Trả về JSON metadata của đối tượng vừa tải lên (có thể chứa `downloadTokens` và `md5Hash`).
+
+### Bước 3: Lấy Download Token & Tạo Download URL
+- **GET** `https://firebasestorage.googleapis.com/v0/b/locket-img/o/users%2F{uid}%2Fmoments%2Fthumbnails%2F{filename}.webp`
+- **Headers:**
+```http
+Authorization: Firebase <idToken>
+```
+- **Response `200`:** Đọc `downloadTokens` (lấy token đầu tiên nếu có nhiều token phân tách bằng dấu phẩy).
 - Tạo URL tải ảnh:
   `https://firebasestorage.googleapis.com/v0/b/locket-img/o/users%2F{uid}%2Fmoments%2Fthumbnails%2F{filename}.webp?alt=media&token=<downloadToken>`
 
-### Bước 3: Gửi Moment (`postMomentV2`)
+### Bước 4: Gửi Moment (`postMomentV2`)
 - **POST** `https://api.locketcamera.com/postMomentV2`
 - **Body:**
 ```json
@@ -331,7 +348,9 @@ X-Upload-Content-Length: <byte_length>
   "data": {
     "thumbnail_url": "<firebase_download_url>",
     "caption": "Hello from HarmonyOS!",
+    "md5": "<md5_hex_of_image_bytes>",
     "sent_to_all": true,
+    "sent_to_self_only": false,
     "recipients": [],
     "overlays": [],
     "show_personally": false,
@@ -341,6 +360,7 @@ X-Upload-Content-Length: <byte_length>
   }
 }
 ```
+> Khi gửi cho toàn bộ bạn bè: `sent_to_all: true`, `sent_to_self_only: false`, `recipients: []`. Khi gửi chọn lọc: `sent_to_all: false`, `recipients: ["<uid1>", ...]`. Khi chỉ lưu riêng cho bản thân: `sent_to_all: false`, `sent_to_self_only: true`, `recipients: []`.
 - **Response `200`:**
 ```json
 {

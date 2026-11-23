@@ -12,9 +12,42 @@ export class LiveCameraController {
   private photoSession: camera.PhotoSession | null = null;
   private isRunning: boolean = false;
   private isCapturing: boolean = false;
+  public currentZoomRatio: number = 1.0;
 
   public isSessionRunning(): boolean {
     return this.isRunning;
+  }
+
+  public getZoomRange(): number[] {
+    if (this.photoSession === null || !this.isRunning) {
+      return [1.0, 4.0];
+    }
+    try {
+      const range = this.photoSession.getZoomRatioRange();
+      if (range !== undefined && range.length >= 2) {
+        return [range[0], range[1]];
+      }
+    } catch (_err) {
+      // Fallback to standard range
+    }
+    return [1.0, 4.0];
+  }
+
+  public setZoomRatio(ratio: number): number {
+    const range = this.getZoomRange();
+    const minZoom = range[0];
+    const maxZoom = range[1];
+    const clamped = Math.min(maxZoom, Math.max(minZoom, ratio));
+    const rounded = Math.round(clamped * 100) / 100;
+    this.currentZoomRatio = rounded;
+    if (this.photoSession !== null && this.isRunning) {
+      try {
+        this.photoSession.setZoomRatio(rounded);
+      } catch (_err) {
+        // Ignore unsupported zoom hardware error
+      }
+    }
+    return this.currentZoomRatio;
   }
 
   public async requestCameraPermission(context: common.UIAbilityContext): Promise<boolean> {
@@ -124,6 +157,7 @@ export class LiveCameraController {
       await session.start();
 
       this.isRunning = true;
+      this.currentZoomRatio = 1.0;
       return true;
     } catch (_err) {
       await this.release();
@@ -228,6 +262,7 @@ export class LiveCameraController {
   public async release(): Promise<void> {
     this.isRunning = false;
     this.isCapturing = false;
+    this.currentZoomRatio = 1.0;
     if (this.photoOutput !== null) {
       try {
         this.photoOutput.off('photoAvailable');

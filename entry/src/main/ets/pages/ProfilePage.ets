@@ -67,17 +67,25 @@ struct ProfilePage {
   }
 
   @Builder
-  private buildSettingsRow(icon: string, label: string, trailing: string, isDanger: boolean, onTap: () => void) {
+  private buildSettingsRow(
+    iconRes: Resource,
+    iconColor: string,
+    label: string,
+    trailing: string,
+    isDanger: boolean,
+    onTap: () => void
+  ) {
     Row() {
-      Text(icon)
-        .fontSize(18)
-        .width(28)
+      Image(iconRes)
+        .width(20)
+        .height(20)
+        .fillColor(iconColor)
 
       Text(label)
         .fontSize(15)
         .fontWeight(FontWeight.Medium)
         .fontColor(isDanger ? '#FF453A' : '#FFFFFF')
-        .margin({ left: 8 })
+        .margin({ left: 12 })
 
       Blank()
 
@@ -107,17 +115,20 @@ struct ProfilePage {
     Column() {
       // Top Back Bar
       Row() {
-        Button('←')
-          .width(44)
-          .height(44)
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .backgroundColor('#1C1C1E')
-          .borderRadius(22)
-          .onClick(() => {
-            router.back();
-          })
+        Column() {
+          Image($r('app.media.ic_back'))
+            .width(20)
+            .height(20)
+            .fillColor('#FFFFFF')
+        }
+        .width(44)
+        .height(44)
+        .backgroundColor('#1C1C1E')
+        .borderRadius(22)
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          router.back();
+        })
 
         Blank()
       }
@@ -126,7 +137,7 @@ struct ProfilePage {
 
       Scroll() {
         Column({ space: 14 }) {
-          // Centered Avatar with 3vp gold ring + Name + Chỉnh ảnh
+          // Centered Avatar with 3vp gold ring + golden glow + Name + Chỉnh ảnh
           Column() {
             Stack({ alignContent: Alignment.Center }) {
               if (this.myProfile !== null && this.myProfile.profilePictureUrl.length > 0) {
@@ -136,6 +147,7 @@ struct ProfilePage {
                   .borderRadius(48)
                   .objectFit(ImageFit.Cover)
                   .border({ width: 3, color: '#FFB800' })
+                  .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
               } else {
                 Column() {
                   Text(this.getInitial())
@@ -148,6 +160,7 @@ struct ProfilePage {
                 .borderRadius(48)
                 .backgroundColor('#262628')
                 .border({ width: 3, color: '#FFB800' })
+                .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
                 .justifyContent(FlexAlign.Center)
               }
             }
@@ -174,8 +187,10 @@ struct ProfilePage {
           // Card 1: Locket Gold
           Row() {
             Column() {
-              Text('👑')
-                .fontSize(22)
+              Image($r('app.media.ic_heart_locket'))
+                .width(22)
+                .height(22)
+                .fillColor('#FFB800')
             }
             .width(42)
             .height(42)
@@ -261,10 +276,10 @@ struct ProfilePage {
             .layoutWeight(1)
 
             Column() {
-              Text('↗')
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor('#FFFFFF')
+              Image($r('app.media.ic_share'))
+                .width(18)
+                .height(18)
+                .fillColor('#FFFFFF')
             }
             .width(38)
             .height(38)
@@ -290,19 +305,20 @@ struct ProfilePage {
             .padding({ left: 8, top: 8 })
 
           Column() {
-            this.buildSettingsRow('🧩', 'Thêm Tiện ích', '', false, () => {
+            this.buildSettingsRow($r('app.media.ic_grid'), '#FFFFFF', 'Thêm Tiện ích', '', false, () => {
               promptAction.showToast({ message: 'Nhấn giữ màn hình chính để thêm tiện ích Locket' });
             })
-            Divider().color('#2E2E30').margin({ left: 52 })
+            Divider().color('#2E2E30').margin({ left: 48 })
             Row() {
-              Text('🔥')
-                .fontSize(18)
-                .width(28)
+              Image($r('app.media.ic_heart_locket'))
+                .width(20)
+                .height(20)
+                .fillColor('#FFB800')
               Text('Chuỗi trên tiện ích')
                 .fontSize(15)
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#FFFFFF')
-                .margin({ left: 8 })
+                .margin({ left: 12 })
               Blank()
               Toggle({ type: ToggleType.Switch, isOn: this.streakOnWidget })
                 .selectedColor('#FFB800')
@@ -328,15 +344,15 @@ struct ProfilePage {
             .padding({ left: 8, top: 8 })
 
           Column() {
-            this.buildSettingsRow('🔔', 'Thông báo', '', false, () => {
+            this.buildSettingsRow($r('app.media.ic_megaphone'), '#FFFFFF', 'Thông báo', '', false, () => {
               promptAction.showToast({ message: 'Thông báo Locket đang được bật' });
             })
-            Divider().color('#2E2E30').margin({ left: 52 })
-            this.buildSettingsRow('✏️', 'Sửa tên', this.getProfileName(), false, () => {
+            Divider().color('#2E2E30').margin({ left: 48 })
+            this.buildSettingsRow($r('app.media.ic_friends'), '#FFFFFF', 'Sửa tên', this.getProfileName(), false, () => {
               promptAction.showToast({ message: `Tên hiện tại: ${this.getProfileName()}` });
             })
-            Divider().color('#2E2E30').margin({ left: 52 })
-            this.buildSettingsRow('✉️', 'Thay đổi địa chỉ email', this.userEmail, false, () => {
+            Divider().color('#2E2E30').margin({ left: 48 })
+            this.buildSettingsRow($r('app.media.ic_chat'), '#FFFFFF', 'Thay đổi địa chỉ email', this.userEmail, false, () => {
               promptAction.showToast({ message: `Email hiện tại: ${this.userEmail}` });
             })
           }
@@ -354,11 +370,11 @@ struct ProfilePage {
             .padding({ left: 8, top: 8 })
 
           Column() {
-            this.buildSettingsRow('🔒', 'Quyền riêng tư', '', false, () => {
+            this.buildSettingsRow($r('app.media.ic_home'), '#FFFFFF', 'Quyền riêng tư', '', false, () => {
               promptAction.showToast({ message: 'Chỉ bạn bè mới có thể xem ảnh Locket của bạn' });
             })
-            Divider().color('#2E2E30').margin({ left: 52 })
-            this.buildSettingsRow('🚫', 'Tài khoản đã chặn', '', false, () => {
+            Divider().color('#2E2E30').margin({ left: 48 })
+            this.buildSettingsRow($r('app.media.ic_close'), '#FFFFFF', 'Tài khoản đã chặn', '', false, () => {
               promptAction.showToast({ message: 'Không có tài khoản nào bị chặn' });
             })
           }
@@ -376,11 +392,11 @@ struct ProfilePage {
             .padding({ left: 8, top: 8 })
 
           Column() {
-            this.buildSettingsRow('🗑', 'Xóa tài khoản', '', true, () => {
+            this.buildSettingsRow($r('app.media.ic_trash'), '#FF453A', 'Xóa tài khoản', '', true, () => {
               promptAction.showToast({ message: 'Vui lòng xác nhận xóa tài khoản qua email hỗ trợ' });
             })
-            Divider().color('#2E2E30').margin({ left: 52 })
-            this.buildSettingsRow('🚪', 'Đăng xuất', '', true, () => {
+            Divider().color('#2E2E30').margin({ left: 48 })
+            this.buildSettingsRow($r('app.media.ic_back'), '#FF453A', 'Đăng xuất', '', true, () => {
               this.handleLogout();
             })
           }

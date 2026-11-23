@@ -104,13 +104,37 @@ struct FriendsPage {
   }
 
   @Builder
-  private buildSocialAppButton(label: string, icon: string, bgColor: string, iconColor: string, isTextIcon: boolean) {
+  private buildSocialIconButton(label: string, iconRes: Resource, bgColor: string, iconColor: string) {
     Column({ space: 6 }) {
       Column() {
-        Text(icon)
-          .fontSize(isTextIcon ? 15 : 24)
+        Image(iconRes)
+          .width(24)
+          .height(24)
+          .fillColor(iconColor)
+      }
+      .width(56)
+      .height(56)
+      .borderRadius(28)
+      .backgroundColor(bgColor)
+      .justifyContent(FlexAlign.Center)
+
+      Text(label)
+        .fontSize(12)
+        .fontColor('#FFFFFF')
+    }
+    .onClick(() => {
+      promptAction.showToast({ message: `Chia sẻ liên kết locket.cam/${this.myUsername} qua ${label}` });
+    })
+  }
+
+  @Builder
+  private buildSocialTextButton(label: string, badgeText: string, bgColor: string, textColor: string) {
+    Column({ space: 6 }) {
+      Column() {
+        Text(badgeText)
+          .fontSize(15)
           .fontWeight(FontWeight.Bold)
-          .fontColor(iconColor)
+          .fontColor(textColor)
       }
       .width(56)
       .height(56)
@@ -160,8 +184,10 @@ struct FriendsPage {
 
         // Rounded search pill #2C2C2E
         Row({ space: 8 }) {
-          Text('🔍')
-            .fontSize(16)
+          Image($r('app.media.ic_search'))
+            .width(18)
+            .height(18)
+            .fillColor('#8E8E93')
             .margin({ left: 14 })
 
           TextInput({
@@ -191,6 +217,7 @@ struct FriendsPage {
               .fontColor('#000000')
               .backgroundColor('#FFB800')
               .borderRadius(17)
+              .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 })
               .margin({ right: 6 })
               .enabled(!this.isSearching)
               .onClick(() => {
@@ -220,6 +247,7 @@ struct FriendsPage {
                 .borderRadius(24)
                 .objectFit(ImageFit.Cover)
                 .border({ width: 2, color: '#FFB800' })
+                .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
             } else {
               Column() {
                 Text(getDisplayName(this.searchResult).substring(0, 1).toUpperCase())
@@ -231,6 +259,7 @@ struct FriendsPage {
               .height(48)
               .borderRadius(24)
               .backgroundColor('#FFB800')
+              .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
               .justifyContent(FlexAlign.Center)
             }
 
@@ -257,6 +286,7 @@ struct FriendsPage {
               .fontColor('#000000')
               .backgroundColor('#FFB800')
               .borderRadius(17)
+              .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 })
               .enabled(!this.isSendingRequest)
               .onClick(() => {
                 if (this.searchResult !== null) {
@@ -283,13 +313,13 @@ struct FriendsPage {
                 .width('100%')
 
               Row() {
-                this.buildSocialAppButton('Messenger', '⚡', '#0084FF', '#FFFFFF', false)
+                this.buildSocialIconButton('Messenger', $r('app.media.ic_chat'), '#0084FF', '#FFFFFF')
                 Blank()
-                this.buildSocialAppButton('Zalo', 'Zalo', '#FFFFFF', '#0068FF', true)
+                this.buildSocialTextButton('Zalo', 'Zalo', '#FFFFFF', '#0068FF')
                 Blank()
-                this.buildSocialAppButton('Insta', '📷', '#E1306C', '#FFFFFF', false)
+                this.buildSocialIconButton('Insta', $r('app.media.ic_gallery'), '#E1306C', '#FFFFFF')
                 Blank()
-                this.buildSocialAppButton('Khác', '•••', '#3A3A3C', '#FFFFFF', true)
+                this.buildSocialIconButton('Khác', $r('app.media.ic_share'), '#3A3A3C', '#FFFFFF')
               }
               .width('100%')
               .padding({ left: 8, right: 8 })
@@ -312,10 +342,10 @@ struct FriendsPage {
                 .layoutWeight(1)
 
                 Column() {
-                  Text('✕')
-                    .fontSize(13)
-                    .fontWeight(FontWeight.Bold)
-                    .fontColor('#8E8E93')
+                  Image($r('app.media.ic_close'))
+                    .width(14)
+                    .height(14)
+                    .fillColor('#8E8E93')
                 }
                 .width(28)
                 .height(28)
@@ -366,6 +396,7 @@ struct FriendsPage {
                   .fontWeight(FontWeight.Bold)
                   .backgroundColor('#FFB800')
                   .borderRadius(19)
+                  .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
                   .onClick(() => {
                     this.loadFriends();
                   })
@@ -377,7 +408,7 @@ struct FriendsPage {
               Column({ space: 12 }) {
                 ForEach(this.friends, (friend: FriendItem) => {
                   Row({ space: 12 }) {
-                    // 56x56 circular avatar with 2.5vp #FFB800 gold ring
+                    // 56x56 circular avatar with 2.5vp #FFB800 gold ring + golden glow
                     if (friend.profilePictureUrl.length > 0) {
                       Image(friend.profilePictureUrl)
                         .width(56)
@@ -385,6 +416,7 @@ struct FriendsPage {
                         .borderRadius(28)
                         .objectFit(ImageFit.Cover)
                         .border({ width: 2.5, color: '#FFB800' })
+                        .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
                     } else {
                       Column() {
                         Text(getDisplayName(friend).substring(0, 1).toUpperCase())
@@ -397,6 +429,7 @@ struct FriendsPage {
                       .borderRadius(28)
                       .backgroundColor('#2C2C2E')
                       .border({ width: 2.5, color: '#FFB800' })
+                      .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
                       .justifyContent(FlexAlign.Center)
                     }
 
@@ -419,8 +452,10 @@ struct FriendsPage {
 
                     // Quick chat icon button
                     Column() {
-                      Text('💬')
-                        .fontSize(16)
+                      Image($r('app.media.ic_chat'))
+                        .width(18)
+                        .height(18)
+                        .fillColor('#FFFFFF')
                     }
                     .width(36)
                     .height(36)
@@ -438,12 +473,12 @@ struct FriendsPage {
                       });
                     })
 
-                    // Circular #2C2C2E ✕ remove button
+                    // Circular #2C2C2E close/remove button
                     Column() {
-                      Text('✕')
-                        .fontSize(14)
-                        .fontWeight(FontWeight.Bold)
-                        .fontColor('#8E8E93')
+                      Image($r('app.media.ic_close'))
+                        .width(14)
+                        .height(14)
+                        .fillColor('#8E8E93')
                     }
                     .width(36)
                     .height(36)

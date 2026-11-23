@@ -61,6 +61,15 @@ export interface ChatMessage {
   thumbnailUrl?: string;
 }
 
+export interface ConversationSummary {
+  conversationId: string;
+  friendUid: string;
+  friendName: string;
+  friendAvatar: string;
+  lastMessage: string;
+  lastUpdatedMs: number;
+}
+
 export interface UploadMomentOptions {
   caption: string;
   recipients: string[];

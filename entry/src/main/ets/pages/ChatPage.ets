@@ -16,6 +16,8 @@ struct ChatPage {
   @State friendName: string = 'Bạn bè';
   @State friendAvatar: string = '';
   @State myUid: string = '';
+  @State myName: string = 'Bạn';
+  @State myAvatar: string = '';
   @State messages: ChatMessage[] = [];
   @State isLoading: boolean = true;
   @State inputText: string = '';
@@ -31,8 +33,27 @@ struct ChatPage {
     const session = SessionManager.getInstance().getSession();
     if (session !== null) {
       this.myUid = session.localId;
+      if (session.displayName.length > 0) {
+        this.myName = session.displayName;
+      }
+      this.loadMyProfile(session.localId);
     }
     this.loadMessages();
+  }
+
+  private async loadMyProfile(uid: string): Promise<void> {
+    try {
+      const me = await LocketApiClient.getInstance().fetchUser(uid);
+      const full = `${me.firstName} ${me.lastName}`.trim();
+      if (full.length > 0) {
+        this.myName = full;
+      } else if (me.username.length > 0) {
+        this.myName = me.username;
+      }
+      this.myAvatar = me.profilePictureUrl;
+    } catch (_err) {
+      // Non-critical
+    }
   }
 
   private async loadMessages(): Promise<void> {
@@ -51,15 +72,17 @@ struct ChatPage {
     }
   }
 
-  private async handleSend(): Promise<void> {
-    const text = this.inputText.trim();
+  private async handleSendText(textToSend: string): Promise<void> {
+    const text = textToSend.trim();
     if (text.length === 0 || this.friendUid.length === 0 || this.isSending) {
       return;
     }
     this.isSending = true;
     try {
       await LocketApiClient.getInstance().sendChatMessage(this.friendUid, text);
-      this.inputText = '';
+      if (textToSend === this.inputText) {
+        this.inputText = '';
+      }
       const optimistic: ChatMessage = {
         id: `local_${Date.now()}`,
         senderUid: this.myUid,
@@ -77,39 +100,57 @@ struct ChatPage {
     }
   }
 
-  private formatTime(ms: number): string {
+  private formatVietnameseDate(ms: number): string {
     if (ms <= 0) {
       return '';
     }
     const d = new Date(ms);
-    const hh = d.getHours().toString().padStart(2, '0');
-    const mm = d.getMinutes().toString().padStart(2, '0');
-    return `${hh}:${mm}`;
+    return `Ngày ${d.getDate()} tháng ${d.getMonth() + 1}`;
+  }
+
+  private hasDisplayText(msg: ChatMessage): boolean {
+    const cleaned = msg.text.replace(/\u200b/g, '').trim();
+    return cleaned.length > 0;
+  }
+
+  private getDisplayText(msg: ChatMessage): string {
+    return msg.text.replace(/\u200b/g, '').trim();
+  }
+
+  private getCardAuthorName(msg: ChatMessage): string {
+    return msg.senderUid === this.myUid ? this.myName : this.friendName;
+  }
+
+  private getCardAuthorAvatar(msg: ChatMessage): string {
+    return msg.senderUid === this.myUid ? this.myAvatar : this.friendAvatar;
   }
 
   build() {
     Column() {
-      // Header
+      // Top Bar: Back + 36x36 Friend Avatar + Bold 19fp Friend Name + Refresh
       Row() {
-        Button('←')
-          .width(42)
-          .height(42)
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .backgroundColor('#1C1C1E')
-          .borderRadius(21)
-          .onClick(() => {
-            router.back();
-          })
+        Column() {
+          Image($r('app.media.ic_back'))
+            .width(20)
+            .height(20)
+            .fillColor('#FFFFFF')
+        }
+        .width(42)
+        .height(42)
+        .backgroundColor('#1C1C1E')
+        .borderRadius(21)
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          router.back();
+        })
 
         if (this.friendAvatar.length > 0) {
           Image(this.friendAvatar)
-            .width(38)
-            .height(38)
-            .borderRadius(19)
+            .width(36)
+            .height(36)
+            .borderRadius(18)
             .objectFit(ImageFit.Cover)
-            .border({ width: 1.5, color: '#FFB800' })
+            .border({ width: 1.5, color: '#2C2C2E' })
             .margin({ left: 12 })
         } else {
           Column() {
@@ -118,34 +159,38 @@ struct ChatPage {
               .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF')
           }
-          .width(38)
-          .height(38)
-          .borderRadius(19)
+          .width(36)
+          .height(36)
+          .borderRadius(18)
           .backgroundColor('#262628')
-          .border({ width: 1.5, color: '#FFB800' })
+          .border({ width: 1.5, color: '#2C2C2E' })
           .justifyContent(FlexAlign.Center)
           .margin({ left: 12 })
         }
 
         Text(this.friendName)
-          .fontSize(17)
+          .fontSize(19)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
           .margin({ left: 10 })
           .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
 
-        Blank()
-
-        Button('↻')
-          .width(40)
-          .height(40)
-          .fontSize(18)
-          .fontColor('#FFB800')
-          .backgroundColor('#1C1C1E')
-          .borderRadius(20)
-          .onClick(() => {
-            this.loadMessages();
-          })
+        Column() {
+          Image($r('app.media.ic_flip_camera'))
+            .width(18)
+            .height(18)
+            .fillColor('#FFB800')
+        }
+        .width(40)
+        .height(40)
+        .backgroundColor('#1C1C1E')
+        .borderRadius(20)
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.loadMessages();
+        })
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 14, bottom: 12 })
@@ -167,58 +212,107 @@ struct ChatPage {
       } else if (this.messages.length === 0) {
         Column() {
           Text('Chưa có tin nhắn nào')
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
           Text('Hãy gửi lời chào tới bạn bè của bạn!')
-            .fontSize(13)
+            .fontSize(14)
             .fontColor('#8E8E93')
             .margin({ top: 6 })
         }
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else {
-        List({ space: 10 }) {
+        List({ space: 12 }) {
           ForEach(this.messages, (msg: ChatMessage) => {
             ListItem() {
-              Row() {
-                if (msg.senderUid === this.myUid) {
-                  Blank()
-                  Column() {
-                    Text(msg.text)
-                      .fontSize(15)
-                      .fontColor('#000000')
-                    if (msg.createdAtMs > 0) {
-                      Text(this.formatTime(msg.createdAtMs))
-                        .fontSize(10)
-                        .fontColor('#4A3A00')
-                        .margin({ top: 4 })
+              Column({ space: 8 }) {
+                // Large 1:1 Replied Moment Photo Card with translucent dark top-left badge
+                if (msg.thumbnailUrl !== undefined && msg.thumbnailUrl.length > 0) {
+                  Stack({ alignContent: Alignment.TopStart }) {
+                    Image(msg.thumbnailUrl)
+                      .width('100%')
+                      .aspectRatio(1)
+                      .objectFit(ImageFit.Cover)
+                      .borderRadius(44)
+                      .backgroundColor('#141416')
+
+                    Row({ space: 8 }) {
+                      if (this.getCardAuthorAvatar(msg).length > 0) {
+                        Image(this.getCardAuthorAvatar(msg))
+                          .width(24)
+                          .height(24)
+                          .borderRadius(12)
+                          .objectFit(ImageFit.Cover)
+                      } else {
+                        Column() {
+                          Text(this.getCardAuthorName(msg).substring(0, 1).toUpperCase())
+                            .fontSize(11)
+                            .fontWeight(FontWeight.Bold)
+                            .fontColor('#FFFFFF')
+                        }
+                        .width(24)
+                        .height(24)
+                        .borderRadius(12)
+                        .backgroundColor('#3A3A3C')
+                        .justifyContent(FlexAlign.Center)
+                      }
+
+                      Text(this.getCardAuthorName(msg))
+                        .fontSize(13)
+                        .fontWeight(FontWeight.Bold)
+                        .fontColor('#FFFFFF')
+                        .maxLines(1)
+
+                      if (msg.createdAtMs > 0) {
+                        Text(this.formatVietnameseDate(msg.createdAtMs))
+                          .fontSize(12)
+                          .fontColor('#D1D1D6')
+                          .maxLines(1)
+                      }
+                    }
+                    .padding({ left: 8, right: 12, top: 6, bottom: 6 })
+                    .borderRadius(20)
+                    .backgroundColor('#991C1C1E')
+                    .margin({ top: 16, left: 16 })
+                  }
+                  .width('100%')
+                  .padding({ left: 12, right: 12 })
+                }
+
+                // Text message bubble
+                if (this.hasDisplayText(msg)) {
+                  Row() {
+                    if (msg.senderUid === this.myUid) {
+                      Blank()
+                      Column() {
+                        Text(this.getDisplayText(msg))
+                          .fontSize(17)
+                          .fontWeight(FontWeight.Bold)
+                          .fontColor('#000000')
+                      }
+                      .alignItems(HorizontalAlign.End)
+                      .padding({ left: 18, right: 18, top: 12, bottom: 12 })
+                      .backgroundColor('#F2F2F7')
+                      .borderRadius(24)
+                      .constraintSize({ maxWidth: '80%' })
+                    } else {
+                      Column() {
+                        Text(this.getDisplayText(msg))
+                          .fontSize(17)
+                          .fontWeight(FontWeight.Medium)
+                          .fontColor('#FFFFFF')
+                      }
+                      .alignItems(HorizontalAlign.Start)
+                      .padding({ left: 18, right: 18, top: 12, bottom: 12 })
+                      .backgroundColor('#262628')
+                      .borderRadius(24)
+                      .constraintSize({ maxWidth: '80%' })
+                      Blank()
                     }
                   }
-                  .alignItems(HorizontalAlign.End)
-                  .padding({ left: 14, right: 14, top: 10, bottom: 8 })
-                  .backgroundColor('#FFB800')
-                  .borderRadius(20)
-                  .constraintSize({ maxWidth: '78%' })
-                } else {
-                  Column() {
-                    Text(msg.text)
-                      .fontSize(15)
-                      .fontColor('#FFFFFF')
-                    if (msg.createdAtMs > 0) {
-                      Text(this.formatTime(msg.createdAtMs))
-                        .fontSize(10)
-                        .fontColor('#8E8E93')
-                        .margin({ top: 4 })
-                    }
-                  }
-                  .alignItems(HorizontalAlign.Start)
-                  .padding({ left: 14, right: 14, top: 10, bottom: 8 })
-                  .backgroundColor('#1C1C1E')
-                  .border({ width: 1, color: '#2E2E30' })
-                  .borderRadius(20)
-                  .constraintSize({ maxWidth: '78%' })
-                  Blank()
+                  .width('100%')
+                  .padding({ left: 16, right: 16 })
                 }
               }
               .width('100%')
@@ -226,47 +320,94 @@ struct ChatPage {
           }, (msg: ChatMessage) => msg.id)
         }
         .layoutWeight(1)
-        .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+        .padding({ top: 8, bottom: 12 })
+        .scrollBar(BarState.Off)
       }
 
-      // Bottom Message Composer
-      Row({ space: 8 }) {
+      // Bottom Composer Pill (#1C1C1E, radius 28, height 56) with inline reactions or golden send
+      Row({ space: 6 }) {
         TextInput({
           placeholder: 'Gửi tin nhắn...',
           text: this.inputText
         })
           .layoutWeight(1)
           .height(48)
-          .fontSize(15)
+          .fontSize(16)
           .fontColor('#FFFFFF')
           .placeholderColor('#8E8E93')
           .caretColor('#FFB800')
-          .backgroundColor('#1C1C1E')
-          .borderRadius(24)
-          .border({ width: 1, color: '#2E2E30' })
-          .padding({ left: 18, right: 18 })
+          .backgroundColor(Color.Transparent)
+          .padding({ left: 12, right: 6 })
           .onChange((value: string) => {
             this.inputText = value;
           })
           .onSubmit(() => {
-            this.handleSend();
+            this.handleSendText(this.inputText);
           })
 
-        Button(this.isSending ? '...' : '➤')
-          .width(48)
-          .height(48)
-          .fontSize(17)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.inputText.trim().length > 0 && !this.isSending ? '#000000' : '#8E8E93')
-          .backgroundColor(this.inputText.trim().length > 0 && !this.isSending ? '#FFB800' : '#1C1C1E')
-          .borderRadius(24)
-          .enabled(!this.isSending && this.inputText.trim().length > 0)
+        if (this.inputText.trim().length > 0) {
+          Column() {
+            if (this.isSending) {
+              LoadingProgress()
+                .width(18)
+                .height(18)
+                .color('#000000')
+            } else {
+              Image($r('app.media.ic_send'))
+                .width(18)
+                .height(18)
+                .fillColor('#000000')
+            }
+          }
+          .width(42)
+          .height(42)
+          .backgroundColor('#FFB800')
+          .borderRadius(21)
+          .shadow({ radius: 20, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+          .justifyContent(FlexAlign.Center)
+          .enabled(!this.isSending)
           .onClick(() => {
-            this.handleSend();
+            this.handleSendText(this.inputText);
           })
+        } else {
+          Text('💛')
+            .fontSize(22)
+            .padding({ left: 4, right: 4 })
+            .onClick(() => {
+              this.handleSendText('💛');
+            })
+          Text('🔥')
+            .fontSize(22)
+            .padding({ left: 4, right: 4 })
+            .onClick(() => {
+              this.handleSendText('🔥');
+            })
+          Text('😍')
+            .fontSize(22)
+            .padding({ left: 4, right: 4 })
+            .onClick(() => {
+              this.handleSendText('😍');
+            })
+          Column() {
+            Image($r('app.media.ic_emoji_add'))
+              .width(20)
+              .height(20)
+              .fillColor('#FFFFFF')
+          }
+          .width(34)
+          .height(34)
+          .justifyContent(FlexAlign.Center)
+          .onClick(() => {
+            this.handleSendText('😂');
+          })
+        }
       }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 18 })
+      .height(56)
+      .padding({ left: 10, right: 10 })
+      .margin({ left: 16, right: 16, top: 8, bottom: 18 })
+      .backgroundColor('#1C1C1E')
+      .borderRadius(28)
+      .border({ width: 1, color: '#2E2E30' })
     }
     .width('100%')
     .height('100%')

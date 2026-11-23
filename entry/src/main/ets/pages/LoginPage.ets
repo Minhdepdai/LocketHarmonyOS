@@ -12,6 +12,19 @@ struct LoginPage {
   @State password: string = '';
   @State isLoading: boolean = false;
   @State errorMessage: string = '';
+  @State primaryBtnScale: number = 1.0;
+
+  private handlePrimaryTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) {
+      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+        this.primaryBtnScale = 0.92;
+      });
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      animateTo({ duration: 180, curve: Curve.EaseOut }, () => {
+        this.primaryBtnScale = 1.0;
+      });
+    }
+  }
 
   private async handleLogin(): Promise<void> {
     if (this.email.trim().length === 0 || this.password.length === 0) {
@@ -46,8 +59,10 @@ struct LoginPage {
       Row({ space: 10 }) {
         // 2x2 Golden Locket Widget
         Column() {
-          Text('💛')
-            .fontSize(26)
+          Image($r('app.media.ic_heart_locket'))
+            .width(28)
+            .height(28)
+            .fillColor('#FFB800')
           Text('Locket')
             .fontSize(9)
             .fontWeight(FontWeight.Bold)
@@ -59,6 +74,7 @@ struct LoginPage {
         .borderRadius(18)
         .backgroundColor('#262628')
         .border({ width: 2, color: '#FFB800' })
+        .shadow({ radius: 16, color: '#66FFB800', offsetX: 0, offsetY: 4 })
         .justifyContent(FlexAlign.Center)
 
         // 2x2 App Icon Dots beside widget
@@ -147,15 +163,16 @@ struct LoginPage {
       // Brand Badge + Title
       Row({ space: 10 }) {
         Column() {
-          Text('♥')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#000000')
+          Image($r('app.media.ic_heart_locket'))
+            .width(20)
+            .height(20)
+            .fillColor('#000000')
         }
         .width(36)
         .height(36)
         .borderRadius(10)
         .backgroundColor('#FFB800')
+        .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 })
         .justifyContent(FlexAlign.Center)
 
         Text('Locket')
@@ -181,6 +198,11 @@ struct LoginPage {
         .fontColor('#000000')
         .backgroundColor('#FFB800')
         .borderRadius(27)
+        .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+        .scale({ x: this.primaryBtnScale, y: this.primaryBtnScale })
+        .onTouch((event: TouchEvent) => {
+          this.handlePrimaryTouch(event);
+        })
         .onClick(() => {
           this.errorMessage = '';
           this.step = 1;
@@ -206,18 +228,21 @@ struct LoginPage {
     Column() {
       // Top-left circular back button
       Row() {
-        Button('<')
-          .width(44)
-          .height(44)
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .backgroundColor('#1C1C1E')
-          .borderRadius(22)
-          .onClick(() => {
-            this.errorMessage = '';
-            this.step = 0;
-          })
+        Column() {
+          Image($r('app.media.ic_back'))
+            .width(20)
+            .height(20)
+            .fillColor('#FFFFFF')
+        }
+        .width(44)
+        .height(44)
+        .backgroundColor('#1C1C1E')
+        .borderRadius(22)
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.errorMessage = '';
+          this.step = 0;
+        })
         Blank()
       }
       .width('100%')
@@ -285,8 +310,17 @@ struct LoginPage {
         .fontColor(this.email.trim().length > 0 ? '#000000' : '#8E8E93')
         .backgroundColor(this.email.trim().length > 0 ? '#FFB800' : '#1C1C1E')
         .borderRadius(27)
+        .shadow(this.email.trim().length > 0
+          ? { radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 }
+          : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+        .scale({ x: this.primaryBtnScale, y: this.primaryBtnScale })
         .enabled(this.email.trim().length > 0)
         .margin({ bottom: 24 })
+        .onTouch((event: TouchEvent) => {
+          if (this.email.trim().length > 0) {
+            this.handlePrimaryTouch(event);
+          }
+        })
         .onClick(() => {
           if (this.email.trim().length > 0) {
             this.errorMessage = '';
@@ -304,18 +338,21 @@ struct LoginPage {
     Column() {
       // Top-left circular back button
       Row() {
-        Button('<')
-          .width(44)
-          .height(44)
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .backgroundColor('#1C1C1E')
-          .borderRadius(22)
-          .onClick(() => {
-            this.errorMessage = '';
-            this.step = 1;
-          })
+        Column() {
+          Image($r('app.media.ic_back'))
+            .width(20)
+            .height(20)
+            .fillColor('#FFFFFF')
+        }
+        .width(44)
+        .height(44)
+        .backgroundColor('#1C1C1E')
+        .borderRadius(22)
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.errorMessage = '';
+          this.step = 1;
+        })
         Blank()
       }
       .width('100%')
@@ -385,8 +422,17 @@ struct LoginPage {
         .fontColor(this.password.length > 0 && !this.isLoading ? '#000000' : '#8E8E93')
         .backgroundColor(this.password.length > 0 && !this.isLoading ? '#FFB800' : '#1C1C1E')
         .borderRadius(27)
+        .shadow(this.password.length > 0 && !this.isLoading
+          ? { radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 }
+          : { radius: 0, color: '#00000000', offsetX: 0, offsetY: 0 })
+        .scale({ x: this.primaryBtnScale, y: this.primaryBtnScale })
         .enabled(this.password.length > 0 && !this.isLoading)
         .margin({ bottom: 24 })
+        .onTouch((event: TouchEvent) => {
+          if (this.password.length > 0 && !this.isLoading) {
+            this.handlePrimaryTouch(event);
+          }
+        })
         .onClick(() => {
           this.handleLogin();
         })

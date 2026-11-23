@@ -67,7 +67,10 @@ struct LocketWidgetCard {
       postCardAction(this, {
         action: 'router',
         abilityName: 'EntryAbility',
-        params: {}
+        params: {
+          source: 'widget',
+          viewMode: 'feed'
+        }
       });
     })
   }

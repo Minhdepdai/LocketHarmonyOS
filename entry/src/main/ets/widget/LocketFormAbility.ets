@@ -32,6 +32,19 @@ export default class LocketFormAbility extends FormExtensionAbility {
     };
   }
 
+  private async registerAndRefreshForm(formId: string): Promise<void> {
+    if (formId.length === 0) {
+      return;
+    }
+    try {
+      await SessionManager.getInstance().addFormId(formId, this.context);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      hilog.warn(LOG_DOMAIN, LOG_TAG, 'Failed to register formId %{public}s: %{public}s', formId, msg);
+    }
+    await this.refreshFormFromStorage(formId);
+  }
+
   private async refreshFormFromStorage(formId: string): Promise<void> {
     if (formId.length === 0) {
       return;
@@ -53,7 +66,8 @@ export default class LocketFormAbility extends FormExtensionAbility {
 
     const formIdParam = want.parameters?.[formInfo.FormParam.IDENTITY_KEY];
     if (typeof formIdParam === 'string' && formIdParam.length > 0) {
-      this.refreshFormFromStorage(formIdParam);
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'onAddForm registering formId=%{public}s', formIdParam);
+      this.registerAndRefreshForm(formIdParam);
     }
 
     return formBindingData.createFormBindingData(initialData);
@@ -61,7 +75,14 @@ export default class LocketFormAbility extends FormExtensionAbility {
 
   onUpdateForm(formId: string): void {
     hilog.info(LOG_DOMAIN, LOG_TAG, 'onUpdateForm: %{public}s', formId);
-    this.refreshFormFromStorage(formId);
+    this.registerAndRefreshForm(formId);
+  }
+
+  onRemoveForm(formId: string): void {
+    hilog.info(LOG_DOMAIN, LOG_TAG, 'onRemoveForm: %{public}s', formId);
+    SessionManager.getInstance().removeFormId(formId, this.context).catch((err: Error) => {
+      hilog.warn(LOG_DOMAIN, LOG_TAG, 'Failed to remove formId %{public}s: %{public}s', formId, err.message);
+    });
   }
 
   onAcquireFormState(_want: Want): formInfo.FormState {
