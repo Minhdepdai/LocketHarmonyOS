@@ -22,6 +22,8 @@ struct ChatPage {
   @State isLoading: boolean = true;
   @State inputText: string = '';
   @State isSending: boolean = false;
+  @StorageProp('safe_top_vp') safeTopVp: number = 38;
+  @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
 
   aboutToAppear(): void {
     const params = router.getParams() as ChatRouteParams | undefined;
@@ -411,6 +413,7 @@ struct ChatPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTopVp, bottom: this.safeBottomVp })
     .backgroundColor('#000000')
   }
 }

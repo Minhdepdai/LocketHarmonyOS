@@ -12,6 +12,8 @@ struct ProfilePage {
   @State userEmail: string = '';
   @State streakOnWidget: boolean = true;
   @State isLoading: boolean = true;
+  @StorageProp('safe_top_vp') safeTopVp: number = 38;
+  @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
 
   aboutToAppear(): void {
     this.loadProfile();
@@ -432,6 +434,7 @@ struct ProfilePage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTopVp, bottom: this.safeBottomVp })
     .backgroundColor('#000000')
   }
 }

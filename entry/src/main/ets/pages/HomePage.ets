@@ -50,6 +50,9 @@ struct HomePage {
   @State burstOffsetY: number = 0;
   @State burstOpacity: number = 0;
   @State burstScale: number = 0.6;
+  @State showFriendFilter: boolean = false;
+  @StorageProp('safe_top_vp') safeTopVp: number = 38;
+  @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
   @StorageProp('locket_widget_tap_ts') @Watch('onWidgetTapChanged') widgetTapTs: number = 0;
   private pinchStartZoom: number = 1.0;
   private viewedMomentIds: Set<string> = new Set();
@@ -115,6 +118,9 @@ struct HomePage {
     }
     if (this.viewMode === 'camera' && targetMode !== 'camera') {
       this.stopLiveCamera();
+    }
+    if (this.showFriendFilter) {
+      this.showFriendFilter = false;
     }
     animateTo({ duration: 260, curve: Curve.EaseInOut }, () => {
       this.viewMode = targetMode;
@@ -295,6 +301,35 @@ struct HomePage {
     });
   }
 
+  private selectFriendFilter(uid: string, label: string): void {
+    this.filterUid = uid;
+    this.filterLabel = label;
+    animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+      this.showFriendFilter = false;
+    });
+    this.reloadFilteredMoments();
+  }
+
+  private async reloadFilteredMoments(): Promise<void> {
+    this.isLoading = true;
+    this.errorMessage = '';
+    this.currentIndex = 0;
+    this.replyText = '';
+    try {
+      const feed = await LocketApiClient.getInstance().getLatestMoments(undefined, this.filterUid);
+      this.moments = feed.moments;
+      this.syncToken = feed.syncToken;
+      if (this.moments.length > 0) {
+        this.markAsViewedSilently(this.moments[0].canonicalUid);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Không thể tải khoảnh khắc';
+      this.errorMessage = msg;
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
   private async loadMessagesTab(): Promise<void> {
     this.isLoadingMessages = true;
     try {
@@ -467,25 +502,25 @@ struct HomePage {
     Stack({ alignContent: Alignment.Center }) {
       if (this.myProfile !== null && this.myProfile.profilePictureUrl.length > 0) {
         Image(this.myProfile.profilePictureUrl)
-          .width(44)
-          .height(44)
-          .borderRadius(22)
+          .width(40)
+          .height(40)
+          .borderRadius(20)
           .objectFit(ImageFit.Cover)
           .border({ width: 2, color: '#FFB800' })
-          .shadow({ radius: 16, color: '#66FFB800', offsetX: 0, offsetY: 2 })
+          .shadow({ radius: 14, color: '#66FFB800', offsetX: 0, offsetY: 2 })
       } else {
         Column() {
           Text(this.getMyInitial())
-            .fontSize(16)
+            .fontSize(15)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
         }
-        .width(44)
-        .height(44)
-        .borderRadius(22)
+        .width(40)
+        .height(40)
+        .borderRadius(20)
         .backgroundColor('#2C2C2E')
         .border({ width: 2, color: '#FFB800' })
-        .shadow({ radius: 16, color: '#66FFB800', offsetX: 0, offsetY: 2 })
+        .shadow({ radius: 14, color: '#66FFB800', offsetX: 0, offsetY: 2 })
         .justifyContent(FlexAlign.Center)
       }
     }
@@ -497,16 +532,16 @@ struct HomePage {
   @Builder
   private buildTopBar() {
     Row() {
-      // Left: 44x44 circle megaphone icon
+      // Left: 40x40 circle megaphone icon
       Column() {
         Image($r('app.media.ic_megaphone'))
-          .width(20)
-          .height(20)
+          .width(18)
+          .height(18)
           .fillColor('#FFFFFF')
       }
-      .width(44)
-      .height(44)
-      .borderRadius(22)
+      .width(40)
+      .height(40)
+      .borderRadius(20)
       .backgroundColor('#1A1A1C')
       .border({ width: 1, color: '#2E2E30' })
       .justifyContent(FlexAlign.Center)
@@ -517,64 +552,62 @@ struct HomePage {
 
       Blank()
 
-      // Center: Mode-aware Friends / Filter pill
+      // Center: Mode-aware Friends / In-Place Filter pill
       Row({ space: 6 }) {
         if (this.viewMode === 'camera') {
           Image($r('app.media.ic_friends'))
-            .width(18)
-            .height(18)
+            .width(17)
+            .height(17)
             .fillColor('#FFFFFF')
           Text(`${this.friendsCount} Bạn bè`)
-            .fontSize(16)
+            .fontSize(15)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
         } else {
           Text(this.filterLabel)
-            .fontSize(16)
+            .fontSize(15)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
+            .fontColor(this.filterUid.length > 0 ? '#FFB800' : '#FFFFFF')
             .maxLines(1)
-          if (this.filterUid.length > 0) {
-            Image($r('app.media.ic_close'))
-              .width(14)
-              .height(14)
-              .fillColor('#8E8E93')
-          } else {
-            Text('⌄')
-              .fontSize(15)
-              .fontColor('#8E8E93')
-          }
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: 160 })
+          Text('⌄')
+            .fontSize(15)
+            .fontColor(this.showFriendFilter ? '#FFB800' : '#8E8E93')
         }
       }
-      .height(44)
-      .padding({ left: 18, right: 18 })
-      .borderRadius(22)
+      .height(40)
+      .padding({ left: 16, right: 16 })
+      .borderRadius(20)
       .backgroundColor('#1A1A1C')
-      .border({ width: 1, color: '#2E2E30' })
+      .border({ width: 1, color: this.showFriendFilter ? '#FFB800' : '#2E2E30' })
       .justifyContent(FlexAlign.Center)
       .onClick(() => {
-        if (this.viewMode !== 'camera' && this.filterUid.length > 0) {
-          this.filterUid = '';
-          this.filterLabel = 'Tất cả bạn bè';
-          this.loadInitialData();
-        } else {
+        if (this.viewMode === 'camera') {
           router.pushUrl({ url: 'pages/FriendsPage' });
+        } else {
+          if (this.allFriends.length === 0) {
+            this.loadFriendsCountSilently();
+          }
+          animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+            this.showFriendFilter = !this.showFriendFilter;
+          });
         }
       })
 
       Blank()
 
-      // Right: 44x44 circular user avatar -> ProfilePage
+      // Right: 40x40 circular user avatar -> ProfilePage
       this.buildProfileAvatarButton()
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 10 })
+    .padding({ left: 16, right: 16, top: 8, bottom: 8 })
   }
 
   @Builder
   private buildCameraMode() {
     Column() {
-      // Large 1:1 rounded live viewfinder with vertical swipe-up + pinch-to-zoom gestures
+      // Balanced 1:1 rounded live viewfinder (88% width, max 340vp, radius 40)
       Stack({ alignContent: Alignment.Bottom }) {
         Stack({ alignContent: Alignment.Center }) {
           XComponent({
@@ -591,24 +624,24 @@ struct HomePage {
             })
             .width('100%')
             .aspectRatio(1)
-            .borderRadius(56)
+            .borderRadius(40)
             .clip(true)
 
           if (!this.isCameraReady) {
             Column() {
               Image($r('app.media.ic_heart_locket'))
-                .width(44)
-                .height(44)
+                .width(40)
+                .height(40)
                 .fillColor('#FFB800')
                 .opacity(0.8)
               Text(this.isFrontCamera ? 'Camera trước • Chạm để chụp' : 'Chạm để chụp hoặc vuốt lên xem lịch sử')
-                .fontSize(14)
+                .fontSize(13)
                 .fontColor('#8E8E93')
-                .margin({ top: 12 })
+                .margin({ top: 10 })
             }
             .width('100%')
             .aspectRatio(1)
-            .borderRadius(56)
+            .borderRadius(40)
             .backgroundColor('#141416')
             .border({ width: 1, color: '#2E2E30' })
             .justifyContent(FlexAlign.Center)
@@ -616,7 +649,7 @@ struct HomePage {
         }
         .width('100%')
         .aspectRatio(1)
-        .borderRadius(56)
+        .borderRadius(40)
         .clip(true)
         .border({ width: 1, color: '#2E2E30' })
 
@@ -627,19 +660,19 @@ struct HomePage {
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFB800')
         }
-        .height(34)
+        .height(32)
         .padding({ left: 14, right: 14 })
-        .borderRadius(17)
+        .borderRadius(16)
         .backgroundColor('#991C1C1E')
         .border({ width: 1, color: '#44FFFFFF' })
         .justifyContent(FlexAlign.Center)
-        .margin({ bottom: 18 })
+        .margin({ bottom: 14 })
         .onClick(() => {
           this.toggleZoom();
         })
       }
-      .width('100%')
-      .padding({ left: 12, right: 12 })
+      .width('88%')
+      .constraintSize({ maxWidth: 340 })
       .margin({ top: 8 })
       .scale({ x: this.captureFlyScale, y: this.captureFlyScale })
       .translate({ x: this.captureFlyX, y: this.captureFlyY })
@@ -668,18 +701,18 @@ struct HomePage {
 
       Blank()
 
-      // Shutter Row: Gallery | Big 84x84 Shutter | Flip
+      // Shutter Row: Gallery 42x42 | Shutter 74x74 | Flip 42x42
       Row() {
         // Left Gallery button
         Column() {
           Image($r('app.media.ic_gallery'))
-            .width(22)
-            .height(22)
+            .width(20)
+            .height(20)
             .fillColor('#FFFFFF')
         }
-        .width(50)
-        .height(50)
-        .borderRadius(25)
+        .width(42)
+        .height(42)
+        .borderRadius(21)
         .backgroundColor('#1C1C1E')
         .border({ width: 1, color: '#2E2E30' })
         .scale({ x: this.galleryPulseScale, y: this.galleryPulseScale })
@@ -688,23 +721,23 @@ struct HomePage {
           this.pickFromGallery();
         })
 
-        // Center big 84x84 Shutter circle (#FFB800 4vp ring + golden glow + press-scale)
+        // Center 74x74 Shutter circle (#FFB800 4vp ring + golden glow + press-scale)
         Stack({ alignContent: Alignment.Center }) {
           Column()
-            .width(84)
-            .height(84)
-            .borderRadius(42)
+            .width(74)
+            .height(74)
+            .borderRadius(37)
             .backgroundColor('#000000')
             .border({ width: 4, color: '#FFB800' })
-            .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+            .shadow({ radius: 22, color: '#66FFB800', offsetX: 0, offsetY: 4 })
 
           Column()
-            .width(68)
-            .height(68)
-            .borderRadius(34)
+            .width(58)
+            .height(58)
+            .borderRadius(29)
             .backgroundColor(this.isCapturing ? '#FFB800' : '#FFFFFF')
         }
-        .margin({ left: 36, right: 36 })
+        .margin({ left: 32, right: 32 })
         .scale({ x: this.shutterScale, y: this.shutterScale })
         .onTouch((event: TouchEvent) => {
           this.handleShutterTouch(event);
@@ -716,13 +749,13 @@ struct HomePage {
         // Right Flip icon
         Column() {
           Image($r('app.media.ic_flip_camera'))
-            .width(22)
-            .height(22)
+            .width(20)
+            .height(20)
             .fillColor('#FFFFFF')
         }
-        .width(50)
-        .height(50)
-        .borderRadius(25)
+        .width(42)
+        .height(42)
+        .borderRadius(21)
         .backgroundColor('#1C1C1E')
         .border({ width: 1, color: '#2E2E30' })
         .justifyContent(FlexAlign.Center)
@@ -744,18 +777,18 @@ struct HomePage {
           .backgroundColor('#6E5200')
 
         Text('Lịch sử ⌄')
-          .fontSize(16)
+          .fontSize(15)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
       }
-      .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-      .margin({ top: 14 })
+      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+      .margin({ top: 12 })
       .onClick(() => {
         this.switchViewMode('feed');
       })
 
-      // Bottom floating pill nav
-      Row({ space: 8 }) {
+      // Bottom floating pill nav (height 50, icon 20x20)
+      Row({ space: 6 }) {
         // Grid / Calendar icon
         Column() {
           Image($r('app.media.ic_grid'))
@@ -763,9 +796,9 @@ struct HomePage {
             .height(20)
             .fillColor('#8E8E93')
         }
-        .width(54)
-        .height(44)
-        .borderRadius(22)
+        .width(50)
+        .height(38)
+        .borderRadius(19)
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
           this.switchViewMode('grid');
@@ -774,13 +807,13 @@ struct HomePage {
         // Home highlighted pill
         Column() {
           Image($r('app.media.ic_home'))
-            .width(22)
-            .height(22)
+            .width(20)
+            .height(20)
             .fillColor('#FFFFFF')
         }
-        .width(68)
-        .height(44)
-        .borderRadius(22)
+        .width(62)
+        .height(38)
+        .borderRadius(19)
         .backgroundColor('#262628')
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
@@ -794,22 +827,24 @@ struct HomePage {
             .height(20)
             .fillColor('#8E8E93')
         }
-        .width(54)
-        .height(44)
-        .borderRadius(22)
+        .width(50)
+        .height(38)
+        .borderRadius(19)
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
           this.switchViewMode('messages');
         })
       }
-      .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-      .borderRadius(32)
+      .height(50)
+      .padding({ left: 6, right: 6 })
+      .borderRadius(25)
       .backgroundColor('#141416')
       .border({ width: 1, color: '#2E2E30' })
-      .margin({ top: 10, bottom: 18 })
+      .margin({ top: 10, bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
+    .alignItems(HorizontalAlign.Center)
     .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 })).animation({ duration: 240, curve: Curve.EaseOut }))
   }
 
@@ -880,36 +915,36 @@ struct HomePage {
           Swiper(this.swiperController) {
             ForEach(this.moments, (item: MomentItem) => {
               Column() {
-                // 1:1 Photo Card (borderRadius 56) + translucent caption pill
+                // Balanced 1:1 Photo Card (88% width, max 340vp, borderRadius 40) + translucent caption pill
                 Stack({ alignContent: Alignment.Bottom }) {
                   Image(item.thumbnailUrl)
                     .width('100%')
                     .aspectRatio(1)
                     .objectFit(ImageFit.Cover)
-                    .borderRadius(56)
+                    .borderRadius(40)
                     .backgroundColor('#141416')
 
                   if (item.caption.length > 0) {
                     Text(item.caption)
-                      .fontSize(16)
+                      .fontSize(15)
                       .fontWeight(FontWeight.Bold)
                       .fontColor('#FFFFFF')
-                      .padding({ left: 18, right: 18, top: 8, bottom: 8 })
+                      .padding({ left: 16, right: 16, top: 7, bottom: 7 })
                       .backgroundColor('#993A3A3C')
-                      .borderRadius(22)
-                      .margin({ bottom: 18, left: 20, right: 20 })
+                      .borderRadius(20)
+                      .margin({ bottom: 16, left: 18, right: 18 })
                   }
                 }
-                .width('100%')
-                .padding({ left: 12, right: 12 })
+                .width('88%')
+                .constraintSize({ maxWidth: 340 })
 
                 // Sender row: 28x28 avatar + bold white name + muted short relative time
                 Row({ space: 8 }) {
                   if (item.senderAvatar.length > 0) {
                     Image(item.senderAvatar)
-                      .width(28)
-                      .height(28)
-                      .borderRadius(14)
+                      .width(26)
+                      .height(26)
+                      .borderRadius(13)
                       .objectFit(ImageFit.Cover)
                   } else {
                     Column() {
@@ -918,28 +953,29 @@ struct HomePage {
                         .fontWeight(FontWeight.Bold)
                         .fontColor('#FFFFFF')
                     }
-                    .width(28)
-                    .height(28)
-                    .borderRadius(14)
+                    .width(26)
+                    .height(26)
+                    .borderRadius(13)
                     .backgroundColor('#2C2C2E')
                     .justifyContent(FlexAlign.Center)
                   }
 
                   Text(item.senderName)
-                    .fontSize(16)
+                    .fontSize(15)
                     .fontWeight(FontWeight.Bold)
                     .fontColor('#FFFFFF')
                     .maxLines(1)
 
                   Text(this.formatShortRelativeTime(item.createdAtSeconds))
-                    .fontSize(14)
+                    .fontSize(13)
                     .fontColor('#8E8E93')
                 }
-                .margin({ top: 14 })
+                .margin({ top: 12 })
                 .justifyContent(FlexAlign.Center)
               }
               .width('100%')
               .height('100%')
+              .alignItems(HorizontalAlign.Center)
               .justifyContent(FlexAlign.Center)
             }, (item: MomentItem) => item.canonicalUid)
           }
@@ -973,12 +1009,12 @@ struct HomePage {
         .layoutWeight(1)
         .width('100%')
 
-        // Combined Reply + Reaction Pill Bar
+        // Combined Reply + Reaction Pill Bar (90% width, height 46, radius 23)
         Row({ space: 4 }) {
           TextInput({ placeholder: 'Gửi tin nh...', text: this.replyText })
             .layoutWeight(1)
-            .height(44)
-            .fontSize(16)
+            .height(40)
+            .fontSize(15)
             .fontColor('#FFFFFF')
             .placeholderColor('#8E8E93')
             .caretColor('#FFB800')
@@ -998,21 +1034,21 @@ struct HomePage {
             Column() {
               if (this.isSendingReply) {
                 LoadingProgress()
-                  .width(18)
-                  .height(18)
+                  .width(16)
+                  .height(16)
                   .color('#000000')
               } else {
                 Image($r('app.media.ic_send'))
-                  .width(18)
-                  .height(18)
+                  .width(16)
+                  .height(16)
                   .fillColor('#000000')
               }
             }
-            .width(40)
-            .height(40)
+            .width(36)
+            .height(36)
             .backgroundColor('#FFB800')
-            .borderRadius(20)
-            .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+            .borderRadius(18)
+            .shadow({ radius: 16, color: '#66FFB800', offsetX: 0, offsetY: 3 })
             .justifyContent(FlexAlign.Center)
             .enabled(!this.isSendingReply)
             .onClick(() => {
@@ -1023,8 +1059,8 @@ struct HomePage {
             })
           } else {
             Text('💛')
-              .fontSize(22)
-              .padding({ left: 5, right: 5 })
+              .fontSize(20)
+              .padding({ left: 4, right: 4 })
               .onClick(() => {
                 const current = this.getCurrentMoment();
                 if (current !== null) {
@@ -1032,8 +1068,8 @@ struct HomePage {
                 }
               })
             Text('🔥')
-              .fontSize(22)
-              .padding({ left: 5, right: 5 })
+              .fontSize(20)
+              .padding({ left: 4, right: 4 })
               .onClick(() => {
                 const current = this.getCurrentMoment();
                 if (current !== null) {
@@ -1041,8 +1077,8 @@ struct HomePage {
                 }
               })
             Text('😍')
-              .fontSize(22)
-              .padding({ left: 5, right: 5 })
+              .fontSize(20)
+              .padding({ left: 4, right: 4 })
               .onClick(() => {
                 const current = this.getCurrentMoment();
                 if (current !== null) {
@@ -1051,12 +1087,12 @@ struct HomePage {
               })
             Column() {
               Image($r('app.media.ic_emoji_add'))
-                .width(20)
-                .height(20)
+                .width(18)
+                .height(18)
                 .fillColor('#FFFFFF')
             }
-            .width(34)
-            .height(34)
+            .width(32)
+            .height(32)
             .justifyContent(FlexAlign.Center)
             .onClick(() => {
               const current = this.getCurrentMoment();
@@ -1066,26 +1102,27 @@ struct HomePage {
             })
           }
         }
-        .height(54)
-        .padding({ left: 10, right: 10 })
-        .margin({ left: 16, right: 16, bottom: 12 })
-        .borderRadius(27)
+        .width('90%')
+        .height(46)
+        .padding({ left: 8, right: 8 })
+        .margin({ bottom: 10 })
+        .borderRadius(23)
         .backgroundColor('#1C1C1E')
         .border({ width: 1, color: '#2E2E30' })
       }
 
       // Bottom Controls Row
       Row() {
-        // Left 48x48 circle: 4-squares Grid icon
+        // Left 44x44 circle: 4-squares Grid icon
         Column() {
           Image($r('app.media.ic_grid'))
             .width(20)
             .height(20)
             .fillColor('#FFFFFF')
         }
-        .width(48)
-        .height(48)
-        .borderRadius(24)
+        .width(44)
+        .height(44)
+        .borderRadius(22)
         .backgroundColor('#1A1A1C')
         .border({ width: 1, color: '#2E2E30' })
         .justifyContent(FlexAlign.Center)
@@ -1095,7 +1132,7 @@ struct HomePage {
 
         Blank()
 
-        // Center pill: Calendar | 44x44 white circle with #FFB800 ring | Chat
+        // Center pill (height 50): Calendar | 38x38 mini shutter | Chat
         Row({ space: 18 }) {
           Image($r('app.media.ic_calendar'))
             .width(20)
@@ -1107,16 +1144,16 @@ struct HomePage {
 
           Stack({ alignContent: Alignment.Center }) {
             Column()
-              .width(44)
-              .height(44)
-              .borderRadius(22)
+              .width(38)
+              .height(38)
+              .borderRadius(19)
               .backgroundColor('#000000')
               .border({ width: 3, color: '#FFB800' })
-              .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+              .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 3 })
             Column()
-              .width(34)
-              .height(34)
-              .borderRadius(17)
+              .width(28)
+              .height(28)
+              .borderRadius(14)
               .backgroundColor('#FFFFFF')
           }
           .onClick(() => {
@@ -1131,15 +1168,15 @@ struct HomePage {
               this.switchViewMode('messages');
             })
         }
-        .height(56)
-        .padding({ left: 20, right: 20 })
-        .borderRadius(28)
+        .height(50)
+        .padding({ left: 18, right: 18 })
+        .borderRadius(25)
         .backgroundColor('#1A1A1C')
         .border({ width: 1, color: '#2E2E30' })
 
         Blank()
 
-        // Right 48x48 circle: Share/Delete icon
+        // Right 44x44 circle: Share/Delete icon
         Column() {
           if (this.isOwnMoment(this.getCurrentMoment())) {
             Image($r('app.media.ic_trash'))
@@ -1153,9 +1190,9 @@ struct HomePage {
               .fillColor('#FFFFFF')
           }
         }
-        .width(48)
-        .height(48)
-        .borderRadius(24)
+        .width(44)
+        .height(44)
+        .borderRadius(22)
         .backgroundColor('#1A1A1C')
         .border({ width: 1, color: '#2E2E30' })
         .justifyContent(FlexAlign.Center)
@@ -1169,10 +1206,11 @@ struct HomePage {
         })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, bottom: 18 })
+      .padding({ left: 16, right: 16, bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
+    .alignItems(HorizontalAlign.Center)
     .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 })).animation({ duration: 240, curve: Curve.EaseOut }))
   }
 
@@ -1224,11 +1262,11 @@ struct HomePage {
         .scrollBar(BarState.Off)
       }
 
-      // Floating bottom center pill overlay (#CC1C1C1E, radius 30)
-      Row({ space: 22 }) {
+      // Floating bottom center pill overlay (#CC1C1C1E, height 50, radius 25)
+      Row({ space: 20 }) {
         Image($r('app.media.ic_grid'))
-          .width(22)
-          .height(22)
+          .width(20)
+          .height(20)
           .fillColor('#FFB800')
           .onClick(() => {
             this.switchViewMode('grid');
@@ -1236,16 +1274,16 @@ struct HomePage {
 
         Stack({ alignContent: Alignment.Center }) {
           Column()
-            .width(44)
-            .height(44)
-            .borderRadius(22)
+            .width(38)
+            .height(38)
+            .borderRadius(19)
             .backgroundColor('#000000')
             .border({ width: 3, color: '#FFB800' })
-            .shadow({ radius: 24, color: '#66FFB800', offsetX: 0, offsetY: 4 })
+            .shadow({ radius: 18, color: '#66FFB800', offsetX: 0, offsetY: 3 })
           Column()
-            .width(34)
-            .height(34)
-            .borderRadius(17)
+            .width(28)
+            .height(28)
+            .borderRadius(14)
             .backgroundColor('#FFFFFF')
         }
         .onClick(() => {
@@ -1253,19 +1291,19 @@ struct HomePage {
         })
 
         Image($r('app.media.ic_chat'))
-          .width(22)
-          .height(22)
+          .width(20)
+          .height(20)
           .fillColor('#FFFFFF')
           .onClick(() => {
             this.switchViewMode('messages');
           })
       }
-      .height(60)
-      .padding({ left: 22, right: 22 })
-      .borderRadius(30)
+      .height(50)
+      .padding({ left: 20, right: 20 })
+      .borderRadius(25)
       .backgroundColor('#CC1C1C1E')
       .border({ width: 1, color: '#2E2E30' })
-      .margin({ bottom: 20 })
+      .margin({ bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
@@ -1279,13 +1317,13 @@ struct HomePage {
         // Dedicated Messages Header: centered bold "Trò chuyện" + right circular user avatar
         Row() {
           Column()
-            .width(44)
-            .height(44)
+            .width(40)
+            .height(40)
 
           Blank()
 
           Text('Trò chuyện')
-            .fontSize(22)
+            .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
 
@@ -1294,7 +1332,7 @@ struct HomePage {
           this.buildProfileAvatarButton()
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 12, bottom: 14 })
+        .padding({ left: 16, right: 16, top: 8, bottom: 10 })
 
         if (this.isLoadingMessages && this.conversations.length === 0 && this.allFriends.length === 0) {
           Column() {
@@ -1461,17 +1499,17 @@ struct HomePage {
       .width('100%')
       .height('100%')
 
-      // Bottom bar: clean centered 3-icon floating pill (Calendar/Grid, Home, highlighted Chat)
-      Row({ space: 8 }) {
+      // Bottom bar: clean centered 3-icon floating pill (height 50, icon 20x20)
+      Row({ space: 6 }) {
         Column() {
           Image($r('app.media.ic_grid'))
             .width(20)
             .height(20)
             .fillColor('#8E8E93')
         }
-        .width(54)
-        .height(44)
-        .borderRadius(22)
+        .width(50)
+        .height(38)
+        .borderRadius(19)
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
           this.switchViewMode('grid');
@@ -1479,13 +1517,13 @@ struct HomePage {
 
         Column() {
           Image($r('app.media.ic_home'))
-            .width(22)
-            .height(22)
+            .width(20)
+            .height(20)
             .fillColor('#8E8E93')
         }
-        .width(54)
-        .height(44)
-        .borderRadius(22)
+        .width(50)
+        .height(38)
+        .borderRadius(19)
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
           this.switchViewMode('camera');
@@ -1494,44 +1532,196 @@ struct HomePage {
         // Highlighted Chat pill
         Column() {
           Image($r('app.media.ic_chat'))
-            .width(22)
-            .height(22)
+            .width(20)
+            .height(20)
             .fillColor('#FFFFFF')
         }
-        .width(68)
-        .height(44)
-        .borderRadius(22)
+        .width(62)
+        .height(38)
+        .borderRadius(19)
         .backgroundColor('#262628')
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
           this.loadMessagesTab();
         })
       }
-      .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-      .borderRadius(32)
+      .height(50)
+      .padding({ left: 6, right: 6 })
+      .borderRadius(25)
       .backgroundColor('#141416')
       .border({ width: 1, color: '#2E2E30' })
-      .margin({ bottom: 20 })
+      .margin({ bottom: 8 })
     }
     .width('100%')
     .layoutWeight(1)
     .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 })).animation({ duration: 240, curve: Curve.EaseOut }))
   }
 
-  build() {
-    Column() {
-      if (this.viewMode !== 'messages') {
-        this.buildTopBar()
-      }
+  @Builder
+  private buildFriendFilterSheet() {
+    Stack({ alignContent: Alignment.Top }) {
+      // Semi-transparent backdrop tapping to dismiss
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#99000000')
+        .onClick(() => {
+          animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+            this.showFriendFilter = false;
+          });
+        })
 
-      if (this.viewMode === 'camera') {
-        this.buildCameraMode()
-      } else if (this.viewMode === 'feed') {
-        this.buildFeedMode()
-      } else if (this.viewMode === 'grid') {
-        this.buildGridMode()
-      } else {
-        this.buildMessagesMode()
+      // Centered floating dark dropdown card right below the top bar
+      Column() {
+        Text('Lọc ảnh theo bạn bè')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#8E8E93')
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 14, bottom: 12 })
+
+        Divider().color('#2E2E30')
+
+        Scroll() {
+          Column({ space: 4 }) {
+            // First option: Tất cả bạn bè
+            Row({ space: 12 }) {
+              Column() {
+                Image($r('app.media.ic_friends'))
+                  .width(18)
+                  .height(18)
+                  .fillColor(this.filterUid === '' ? '#000000' : '#FFFFFF')
+              }
+              .width(36)
+              .height(36)
+              .borderRadius(18)
+              .backgroundColor(this.filterUid === '' ? '#FFB800' : '#2C2C2E')
+              .justifyContent(FlexAlign.Center)
+
+              Text('Tất cả bạn bè')
+                .fontSize(15)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.filterUid === '' ? '#FFB800' : '#FFFFFF')
+                .layoutWeight(1)
+
+              if (this.filterUid === '') {
+                Text('✓')
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#FFB800')
+              }
+            }
+            .width('100%')
+            .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+            .borderRadius(14)
+            .backgroundColor(this.filterUid === '' ? '#262628' : Color.Transparent)
+            .onClick(() => {
+              this.selectFriendFilter('', 'Tất cả bạn bè');
+            })
+
+            // Friend list options
+            ForEach(this.allFriends, (friend: FriendItem) => {
+              Row({ space: 12 }) {
+                if (friend.profilePictureUrl.length > 0) {
+                  Image(friend.profilePictureUrl)
+                    .width(36)
+                    .height(36)
+                    .borderRadius(18)
+                    .objectFit(ImageFit.Cover)
+                    .border({
+                      width: this.filterUid === friend.uid ? 2 : 1,
+                      color: this.filterUid === friend.uid ? '#FFB800' : '#3A3A3C'
+                    })
+                } else {
+                  Column() {
+                    Text(getDisplayName(friend).substring(0, 1).toUpperCase())
+                      .fontSize(14)
+                      .fontWeight(FontWeight.Bold)
+                      .fontColor('#FFFFFF')
+                  }
+                  .width(36)
+                  .height(36)
+                  .borderRadius(18)
+                  .backgroundColor('#2C2C2E')
+                  .border({
+                    width: this.filterUid === friend.uid ? 2 : 1,
+                    color: this.filterUid === friend.uid ? '#FFB800' : '#3A3A3C'
+                  })
+                  .justifyContent(FlexAlign.Center)
+                }
+
+                Text(getDisplayName(friend))
+                  .fontSize(15)
+                  .fontWeight(this.filterUid === friend.uid ? FontWeight.Bold : FontWeight.Medium)
+                  .fontColor(this.filterUid === friend.uid ? '#FFB800' : '#FFFFFF')
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+
+                if (this.filterUid === friend.uid) {
+                  Column()
+                    .width(10)
+                    .height(10)
+                    .borderRadius(5)
+                    .backgroundColor('#FFB800')
+                }
+              }
+              .width('100%')
+              .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+              .borderRadius(14)
+              .backgroundColor(this.filterUid === friend.uid ? '#262628' : Color.Transparent)
+              .onClick(() => {
+                this.selectFriendFilter(friend.uid, getDisplayName(friend));
+              })
+            }, (friend: FriendItem) => friend.uid)
+          }
+          .width('100%')
+          .padding({ left: 8, right: 8, top: 8, bottom: 10 })
+        }
+        .width('100%')
+        .constraintSize({ maxHeight: 340 })
+        .scrollBar(BarState.Off)
+      }
+      .width('84%')
+      .constraintSize({ maxHeight: '60%' })
+      .backgroundColor('#1C1C1E')
+      .borderRadius(24)
+      .border({ width: 1, color: '#2E2E30' })
+      .shadow({ radius: 28, color: '#88000000', offsetX: 0, offsetY: 10 })
+      .margin({ top: this.safeTopVp + 56 })
+      .transition(
+        TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -12 }))
+          .animation({ duration: 220, curve: Curve.EaseOut })
+      )
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  build() {
+    Stack({ alignContent: Alignment.Top }) {
+      Column() {
+        if (this.viewMode !== 'messages') {
+          this.buildTopBar()
+        }
+
+        if (this.viewMode === 'camera') {
+          this.buildCameraMode()
+        } else if (this.viewMode === 'feed') {
+          this.buildFeedMode()
+        } else if (this.viewMode === 'grid') {
+          this.buildGridMode()
+        } else {
+          this.buildMessagesMode()
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: this.safeTopVp, bottom: this.safeBottomVp })
+
+      if (this.showFriendFilter && (this.viewMode === 'feed' || this.viewMode === 'grid')) {
+        this.buildFriendFilterSheet()
       }
     }
     .width('100%')

@@ -33,6 +33,8 @@ struct CameraPage {
   @State photoCardY: number = 0;
   @State photoCardOpacity: number = 1.0;
   @State galleryPulseScale: number = 1.0;
+  @StorageProp('safe_top_vp') safeTopVp: number = 38;
+  @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
   private pinchStartZoom: number = 1.0;
   private cameraSurfaceId: string = '';
   private xComponentController: XComponentController = new XComponentController();
@@ -278,20 +280,20 @@ struct CameraPage {
               .height(20)
               .fillColor('#FFFFFF')
           }
-          .width(44)
-          .height(44)
+          .width(40)
+          .height(40)
           .backgroundColor('#1C1C1E')
-          .borderRadius(22)
+          .borderRadius(20)
           .justifyContent(FlexAlign.Center)
           .onClick(() => {
             router.back();
           })
 
           Text('Gửi đến...')
-            .fontSize(20)
+            .fontSize(19)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
-            .margin({ left: 14 })
+            .margin({ left: 12 })
 
           Blank()
 
@@ -302,10 +304,10 @@ struct CameraPage {
                 .height(20)
                 .fillColor('#FFFFFF')
             }
-            .width(44)
-            .height(44)
+            .width(40)
+            .height(40)
             .backgroundColor('#1C1C1E')
-            .borderRadius(22)
+            .borderRadius(20)
             .justifyContent(FlexAlign.Center)
             .onClick(() => {
               this.flipCamera();
@@ -325,18 +327,18 @@ struct CameraPage {
           }
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 14, bottom: 12 })
+        .padding({ left: 16, right: 16, top: 8, bottom: 8 })
 
         Scroll() {
           Column({ space: 14 }) {
-            // 1:1 Square Viewfinder / Preview with Locket 48vp rounded corners
+            // 1:1 Square Viewfinder / Preview with balanced 88% (max 340vp) & 40vp rounded corners
             Stack({ alignContent: Alignment.Bottom }) {
               if (this.selectedPhotoUri.length > 0) {
                 Image(this.getDisplayPhotoSrc())
                   .width('100%')
                   .aspectRatio(1)
                   .objectFit(ImageFit.Cover)
-                  .borderRadius(48)
+                  .borderRadius(40)
                   .backgroundColor('#141416')
               } else {
                 Stack({ alignContent: Alignment.Center }) {
@@ -354,7 +356,7 @@ struct CameraPage {
                     })
                     .width('100%')
                     .aspectRatio(1)
-                    .borderRadius(48)
+                    .borderRadius(40)
                     .clip(true)
 
                   if (!this.isCameraReady) {
@@ -370,14 +372,14 @@ struct CameraPage {
                     .width('100%')
                     .aspectRatio(1)
                     .backgroundColor('#141416')
-                    .borderRadius(48)
+                    .borderRadius(40)
                     .border({ width: 1, color: '#2E2E30' })
                     .justifyContent(FlexAlign.Center)
                   }
                 }
                 .width('100%')
                 .aspectRatio(1)
-                .borderRadius(48)
+                .borderRadius(40)
                 .clip(true)
               }
 
@@ -388,13 +390,13 @@ struct CameraPage {
                     .fontWeight(FontWeight.Bold)
                     .fontColor('#FFB800')
                 }
-                .height(34)
+                .height(32)
                 .padding({ left: 14, right: 14 })
-                .borderRadius(17)
+                .borderRadius(16)
                 .backgroundColor('#991C1C1E')
                 .border({ width: 1, color: '#44FFFFFF' })
                 .justifyContent(FlexAlign.Center)
-                .margin({ bottom: 16 })
+                .margin({ bottom: 14 })
                 .onClick(() => {
                   this.toggleZoom();
                 })
@@ -408,10 +410,11 @@ struct CameraPage {
                   .padding({ left: 16, right: 16, top: 8, bottom: 8 })
                   .backgroundColor('#993A3A3C')
                   .borderRadius(20)
-                  .margin({ bottom: 16, left: 20, right: 20 })
+                  .margin({ bottom: 14, left: 20, right: 20 })
               }
             }
-            .width('100%')
+            .width('88%')
+            .constraintSize({ maxWidth: 340 })
             .scale({ x: this.photoCardScale, y: this.photoCardScale })
             .translate({ x: this.photoCardX, y: this.photoCardY })
             .opacity(this.photoCardOpacity)
@@ -587,6 +590,7 @@ struct CameraPage {
             })
           }
           .width('100%')
+          .alignItems(HorizontalAlign.Center)
           .padding({ left: 16, right: 16 })
         }
         .layoutWeight(1)
@@ -594,6 +598,7 @@ struct CameraPage {
       }
       .width('100%')
       .height('100%')
+      .padding({ top: this.safeTopVp, bottom: this.safeBottomVp })
       .backgroundColor('#000000')
 
       // Animated Uploading & Post-Success Overlay

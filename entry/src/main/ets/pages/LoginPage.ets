@@ -13,6 +13,8 @@ struct LoginPage {
   @State isLoading: boolean = false;
   @State errorMessage: string = '';
   @State primaryBtnScale: number = 1.0;
+  @StorageProp('safe_top_vp') safeTopVp: number = 38;
+  @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
 
   private handlePrimaryTouch(event: TouchEvent): void {
     if (event.type === TouchType.Down) {
@@ -454,6 +456,7 @@ struct LoginPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTopVp, bottom: this.safeBottomVp })
     .backgroundColor('#000000')
   }
 }

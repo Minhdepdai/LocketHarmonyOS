@@ -1,6 +1,6 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { window } from '@kit.ArkUI';
+import { display, window } from '@kit.ArkUI';
 import { WidgetMomentData } from '../models/LocketModels';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { NotificationService } from '../services/NotificationService';
@@ -8,6 +8,8 @@ import { SessionManager } from '../services/SessionManager';
 
 const LOG_DOMAIN = 0x0000;
 const LOG_TAG = 'LocketHarmony';
+const DEFAULT_SAFE_TOP_VP = 38;
+const DEFAULT_SAFE_BOTTOM_VP = 20;
 
 interface WidgetDeepLinkParams {
   source?: string;
@@ -17,6 +19,70 @@ interface WidgetDeepLinkParams {
 
 export default class EntryAbility extends UIAbility {
   private isSessionInitialized: boolean = false;
+
+  private getDensityPixels(): number {
+    try {
+      const density = display.getDefaultDisplaySync().densityPixels;
+      if (density > 0) {
+        return density;
+      }
+    } catch (_err) {
+      // Fallback density
+    }
+    return 3;
+  }
+
+  private updateSafeAreaInsets(mainWindow: window.Window): void {
+    try {
+      const density = this.getDensityPixels();
+      const sysArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      const navArea = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+      const topVp = sysArea.topRect.height > 0
+        ? Math.ceil(sysArea.topRect.height / density)
+        : DEFAULT_SAFE_TOP_VP;
+      const bottomVp = navArea.bottomRect.height > 0
+        ? Math.ceil(navArea.bottomRect.height / density)
+        : DEFAULT_SAFE_BOTTOM_VP;
+      AppStorage.setOrCreate<number>('safe_top_vp', topVp);
+      AppStorage.setOrCreate<number>('safe_bottom_vp', bottomVp);
+    } catch (_err) {
+      AppStorage.setOrCreate<number>('safe_top_vp', DEFAULT_SAFE_TOP_VP);
+      AppStorage.setOrCreate<number>('safe_bottom_vp', DEFAULT_SAFE_BOTTOM_VP);
+    }
+  }
+
+  private async configureImmersiveWindow(windowStage: window.WindowStage): Promise<void> {
+    AppStorage.setOrCreate<number>('safe_top_vp', DEFAULT_SAFE_TOP_VP);
+    AppStorage.setOrCreate<number>('safe_bottom_vp', DEFAULT_SAFE_BOTTOM_VP);
+    try {
+      const mainWindow = windowStage.getMainWindowSync();
+      await mainWindow.setWindowLayoutFullScreen(true);
+      await mainWindow.setWindowSystemBarProperties({
+        statusBarColor: '#00000000',
+        statusBarContentColor: '#FFFFFF',
+        navigationBarColor: '#00000000',
+        navigationBarContentColor: '#FFFFFF'
+      });
+      this.updateSafeAreaInsets(mainWindow);
+      mainWindow.on('avoidAreaChange', (data: window.AvoidAreaOptions) => {
+        const density = this.getDensityPixels();
+        if (data.type === window.AvoidAreaType.TYPE_SYSTEM) {
+          const topVp = data.area.topRect.height > 0
+            ? Math.ceil(data.area.topRect.height / density)
+            : DEFAULT_SAFE_TOP_VP;
+          AppStorage.setOrCreate<number>('safe_top_vp', topVp);
+        } else if (data.type === window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR) {
+          const bottomVp = data.area.bottomRect.height > 0
+            ? Math.ceil(data.area.bottomRect.height / density)
+            : DEFAULT_SAFE_BOTTOM_VP;
+          AppStorage.setOrCreate<number>('safe_bottom_vp', bottomVp);
+        }
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      hilog.warn(LOG_DOMAIN, LOG_TAG, 'Immersive window setup fallback: %{public}s', msg);
+    }
+  }
 
   private handleDeepLinkWant(want: Want): void {
     const params = want.parameters;
@@ -113,6 +179,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
+    await this.configureImmersiveWindow(windowStage);
     await SessionManager.getInstance().init(this.context);
     this.isSessionInitialized = true;
     SessionManager.getInstance().syncAuthAppStorage();

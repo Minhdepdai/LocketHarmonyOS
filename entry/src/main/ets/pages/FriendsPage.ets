@@ -20,6 +20,8 @@ struct FriendsPage {
   @State myUsername: string = 'locket';
   @State myDisplayName: string = '';
   @State isKnockShareActive: boolean = false;
+  @StorageProp('safe_top_vp') safeTopVp: number = 38;
+  @StorageProp('safe_bottom_vp') safeBottomVp: number = 20;
   private isPageVisible: boolean = false;
   private isUsernameLoaded: boolean = false;
 
@@ -628,13 +630,14 @@ struct FriendsPage {
       }
       .width('100%')
       .layoutWeight(1)
-      .padding({ left: 18, right: 18 })
+      .padding({ left: 18, right: 18, bottom: this.safeBottomVp })
       .backgroundColor('#1C1C1E')
       .borderRadius({ topLeft: 28, topRight: 28 })
-      .margin({ top: 12 })
+      .margin({ top: 8 })
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTopVp })
     .backgroundColor('#000000')
   }
 }
