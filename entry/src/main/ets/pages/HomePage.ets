@@ -25,6 +25,7 @@ interface HomeRouteParams {
 struct HomePage {
   @State viewMode: string = 'camera';
   @State moments: MomentItem[] = [];
+  @State missedMomentsCount: number = 0;
   @State friendsCount: number = 0;
   @State allFriends: FriendItem[] = [];
   @State conversations: ConversationSummary[] = [];
@@ -178,8 +179,11 @@ struct HomePage {
       AppStorage.setOrCreate<string>('locket_pending_view_mode', '');
       this.switchViewMode(pendingMode);
     }
-    if (this.viewMode === 'camera' && this.cameraSurfaceId.length > 0 && !this.liveCamera.isSessionRunning()) {
-      this.startLiveCamera();
+    if (this.viewMode === 'camera') {
+      this.loadMissedMomentsCountSilently();
+      if (this.cameraSurfaceId.length > 0 && !this.liveCamera.isSessionRunning()) {
+        this.startLiveCamera();
+      }
     } else if (this.viewMode === 'messages') {
       this.loadMessagesTab();
     }
@@ -218,7 +222,13 @@ struct HomePage {
     animateTo({ curve: curves.springMotion(0.52, 0.86) }, () => {
       this.viewMode = targetMode;
     });
-    if (targetMode === 'messages') {
+    if (targetMode === 'feed') {
+      this.missedMomentsCount = 0;
+      if (this.moments.length > 0) {
+        const idx = Math.min(Math.max(0, this.currentIndex), this.moments.length - 1);
+        this.markAsViewedSilently(this.moments[idx].canonicalUid);
+      }
+    } else if (targetMode === 'messages') {
       this.loadMessagesTab();
     }
   }
@@ -402,8 +412,9 @@ struct HomePage {
       this.syncToken = feed.syncToken;
       if (this.filterUid.length === 0) {
         CacheService.getInstance().saveMoments(feed.moments);
+        this.loadMissedMomentsCountSilently();
       }
-      if (this.moments.length > 0) {
+      if (this.viewMode === 'feed' && this.moments.length > 0) {
         this.markAsViewedSilently(this.moments[0].canonicalUid);
       }
       this.loadFriendsCountSilently();
@@ -415,6 +426,14 @@ struct HomePage {
     } finally {
       this.isLoading = false;
     }
+  }
+
+  private loadMissedMomentsCountSilently(): void {
+    LocketApiClient.getInstance().fetchMissedMomentsCount().then((count: number) => {
+      this.missedMomentsCount = count;
+    }).catch(() => {
+      // Non-critical unseen count fetch
+    });
   }
 
   private loadFriendsCountSilently(): void {
@@ -532,6 +551,9 @@ struct HomePage {
       return;
     }
     this.viewedMomentIds.add(momentUid);
+    if (this.missedMomentsCount > 0) {
+      this.missedMomentsCount -= 1;
+    }
     LocketApiClient.getInstance().markMomentAsViewed(momentUid).catch(() => {
       // Non-critical background call
     });
@@ -715,9 +737,10 @@ struct HomePage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .constraintSize({ maxWidth: 165 })
-          Text('⌄')
-            .fontSize(16)
-            .fontColor(this.showFriendFilter ? '#FFB800' : '#8E8E93')
+          Image($r('app.media.ic_chevron_down'))
+            .width(15)
+            .height(15)
+            .fillColor(this.showFriendFilter ? '#FFB800' : '#8E8E93')
         }
       }
       .height(48)
@@ -934,26 +957,41 @@ struct HomePage {
       .margin({ top: 22 })
 
       // History cue below shutter
-      Row({ space: 10 }) {
-        Column() {
-          Text(`${this.moments.length}+`)
-            .fontSize(13)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#FFB800')
-        }
-        .height(28)
-        .padding({ left: 10, right: 10 })
-        .borderRadius(14)
-        .backgroundColor('#6E5200')
-        .justifyContent(FlexAlign.Center)
+      Column({ space: 4 }) {
+        Row({ space: 8 }) {
+          if (this.missedMomentsCount > 0) {
+            Row() {
+              Text(this.missedMomentsCount > 99 ? '99+' : `${this.missedMomentsCount}`)
+                .fontSize(13)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#000000')
+            }
+            .constraintSize({ minWidth: 28 })
+            .height(26)
+            .padding({ left: 9, right: 9 })
+            .borderRadius(13)
+            .backgroundColor('#FFB800')
+            .shadow({ radius: 14, color: '#66FFB800', offsetX: 0, offsetY: 2 })
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+          }
 
-        Text('Lịch sử ⌄')
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
+          Text('Lịch sử')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+        }
+        .alignItems(VerticalAlign.Center)
+
+        Image($r('app.media.ic_chevron_down'))
+          .width(18)
+          .height(18)
+          .fillColor('#FFFFFF')
+          .opacity(0.92)
       }
-      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-      .margin({ top: 14 })
+      .padding({ left: 18, right: 18, top: 8, bottom: 8 })
+      .margin({ top: 12 })
+      .alignItems(HorizontalAlign.Center)
       .scale(this.pressedButtonId === 'home_history_cue' ? { x: 0.91, y: 0.91 } : { x: 1, y: 1 })
       .onTouch((e: TouchEvent) => {
         this.handleButtonTouch('home_history_cue', e);

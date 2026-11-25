@@ -83,6 +83,7 @@ export interface WidgetMomentData {
   caption: string;
   senderName: string;
   createdAtSeconds: number;
+  unseenCount?: number;
 }
 
 export function getDisplayName(profile: UserProfile | FriendItem): string {

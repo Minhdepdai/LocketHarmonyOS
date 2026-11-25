@@ -1,7 +1,7 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { display, window } from '@kit.ArkUI';
-import { WidgetMomentData } from '../models/LocketModels';
+import { ConversationSummary, WidgetMomentData } from '../models/LocketModels';
 import { CacheService } from '../services/CacheService';
 import { LocketApiClient } from '../services/LocketApiClient';
 import { NotificationService } from '../services/NotificationService';
@@ -20,6 +20,9 @@ interface WidgetDeepLinkParams {
 
 export default class EntryAbility extends UIAbility {
   private isSessionInitialized: boolean = false;
+  private pollTimerId: number = -1;
+  private isSyncing: boolean = false;
+  private readonly POLL_INTERVAL_MS: number = 60000;
 
   private getDensityPixels(): number {
     try {
@@ -120,7 +123,25 @@ export default class EntryAbility extends UIAbility {
     }
   }
 
+  private startBackgroundPoll(): void {
+    this.stopBackgroundPoll();
+    this.pollTimerId = setInterval(() => {
+      this.refreshOnForeground();
+    }, this.POLL_INTERVAL_MS);
+  }
+
+  private stopBackgroundPoll(): void {
+    if (this.pollTimerId !== -1) {
+      clearInterval(this.pollTimerId);
+      this.pollTimerId = -1;
+    }
+  }
+
   private async refreshOnForeground(): Promise<void> {
+    if (this.isSyncing) {
+      return;
+    }
+    this.isSyncing = true;
     try {
       const sessionMgr = SessionManager.getInstance();
       if (!this.isSessionInitialized) {
@@ -137,37 +158,77 @@ export default class EntryAbility extends UIAbility {
       const api = LocketApiClient.getInstance();
       await api.ensureValidToken();
 
-      const previousCached = sessionMgr.getLatestWidgetMoment();
-      const previousUid = previousCached !== null ? previousCached.canonicalUid : '';
-
       const feed = await api.getLatestMoments();
-      if (feed.moments.length === 0) {
-        return;
+      let missedCount = 0;
+      try {
+        missedCount = await api.fetchMissedMomentsCount();
+      } catch (countErr) {
+        const countMsg = countErr instanceof Error ? countErr.message : String(countErr);
+        hilog.warn(LOG_DOMAIN, LOG_TAG, 'Missed moments count fetch skipped: %{public}s', countMsg);
       }
-      await CacheService.getInstance().saveMoments(feed.moments);
 
-      const latest = feed.moments[0];
-      if (latest.canonicalUid.length > 0 && latest.canonicalUid !== previousUid) {
+      if (feed.moments.length > 0) {
+        await CacheService.getInstance().saveMoments(feed.moments);
+
+        const latest = feed.moments[0];
         const widgetData: WidgetMomentData = {
           canonicalUid: latest.canonicalUid,
           thumbnailUrl: latest.thumbnailUrl,
           caption: latest.caption,
           senderName: latest.senderName,
-          createdAtSeconds: latest.createdAtSeconds
+          createdAtSeconds: latest.createdAtSeconds,
+          unseenCount: missedCount
         };
         await sessionMgr.saveLatestWidgetMoment(widgetData);
-        await sessionMgr.notifyAllWidgets(widgetData);
+        await sessionMgr.notifyAllWidgets(widgetData, this.context, missedCount);
 
-        if (previousUid.length > 0) {
-          await NotificationService.getInstance().publishNewMomentNotification(
-            latest.senderName,
-            latest.caption
-          );
+        const lastNotifiedId = sessionMgr.getLastNotifiedMomentId();
+        const myUid = sessionMgr.getSession()?.localId ?? '';
+        if (latest.canonicalUid.length > 0 && latest.canonicalUid !== lastNotifiedId) {
+          if (lastNotifiedId.length > 0 && latest.userUid !== myUid) {
+            await NotificationService.getInstance().publishNewMomentNotification(
+              latest.senderName,
+              latest.caption
+            );
+          }
+          await sessionMgr.setLastNotifiedMomentId(latest.canonicalUid);
         }
+      }
+
+      try {
+        const convs = await api.getConversations();
+        if (convs.length > 0) {
+          await CacheService.getInstance().saveConversations(convs);
+          let newestConv: ConversationSummary | null = null;
+          let maxUpdatedMs = 0;
+          for (let i = 0; i < convs.length; i++) {
+            const conv = convs[i];
+            if (conv.lastUpdatedMs > maxUpdatedMs) {
+              maxUpdatedMs = conv.lastUpdatedMs;
+              newestConv = conv;
+            }
+          }
+          const lastMsgTs = sessionMgr.getLastNotifiedMsgTs();
+          if (newestConv !== null && newestConv.lastUpdatedMs > lastMsgTs) {
+            if (lastMsgTs > 0 && newestConv.lastMessage.length > 0) {
+              await NotificationService.getInstance().publishNewMessageNotification(
+                newestConv.friendName,
+                newestConv.lastMessage,
+                newestConv.friendUid
+              );
+            }
+            await sessionMgr.setLastNotifiedMsgTs(newestConv.lastUpdatedMs);
+          }
+        }
+      } catch (msgErr) {
+        const msgText = msgErr instanceof Error ? msgErr.message : String(msgErr);
+        hilog.warn(LOG_DOMAIN, LOG_TAG, 'Conversation poll skipped: %{public}s', msgText);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       hilog.warn(LOG_DOMAIN, LOG_TAG, 'Foreground refresh skipped: %{public}s', msg);
+    } finally {
+      this.isSyncing = false;
     }
   }
 
@@ -188,7 +249,9 @@ export default class EntryAbility extends UIAbility {
     this.isSessionInitialized = true;
     SessionManager.getInstance().syncAuthAppStorage();
 
+    NotificationService.getInstance().setBundleName(this.context.abilityInfo.bundleName);
     NotificationService.getInstance().requestEnableNotification(this.context);
+    NotificationService.getInstance().initPushKit();
 
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
@@ -201,9 +264,16 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     hilog.info(LOG_DOMAIN, LOG_TAG, '%{public}s', 'Ability onForeground');
     this.refreshOnForeground();
+    this.startBackgroundPoll();
   }
 
   onBackground(): void {
     hilog.info(LOG_DOMAIN, LOG_TAG, '%{public}s', 'Ability onBackground');
+    this.stopBackgroundPoll();
+  }
+
+  onDestroy(): void {
+    hilog.info(LOG_DOMAIN, LOG_TAG, '%{public}s', 'Ability onDestroy');
+    this.stopBackgroundPoll();
   }
 }

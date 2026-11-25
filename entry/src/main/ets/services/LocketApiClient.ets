@@ -121,6 +121,16 @@ interface GetMomentsResponse {
   result?: GetMomentsResult;
 }
 
+interface GetLatestMomentV2BodyData {
+  excluded_users: string[];
+  fetch_streak: boolean;
+  should_count_missed_moments: boolean;
+}
+
+interface GetLatestMomentV2RequestBody {
+  data: GetLatestMomentV2BodyData;
+}
+
 interface ProtobufInt64Value {
   '@type': string;
   value: string;
@@ -641,6 +651,25 @@ export class LocketApiClient {
       missedMomentsCount: 0,
       syncToken: currentToken
     };
+  }
+
+  public async fetchMissedMomentsCount(): Promise<number> {
+    const session = await this.ensureValidToken();
+    const body: GetLatestMomentV2RequestBody = {
+      data: {
+        excluded_users: [],
+        fetch_streak: true,
+        should_count_missed_moments: true
+      }
+    };
+    const res = await this.requestJson<GetMomentsResponse>(
+      `${LOCKET_API_BASE}/getLatestMomentV2`,
+      http.RequestMethod.POST,
+      this.buildHeaders(session.idToken),
+      JSON.stringify(body)
+    );
+    const count = res.result?.missed_moments_count ?? 0;
+    return count > 0 ? count : 0;
   }
 
   public async reactToMoment(momentUid: string, emoji: string): Promise<void> {

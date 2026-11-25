@@ -1,34 +1,32 @@
-import { formBindingData, FormExtensionAbility, formInfo, formProvider } from '@kit.FormKit';
+import { formBindingData, FormExtensionAbility, formInfo } from '@kit.FormKit';
 import { Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { WidgetMomentData } from '../models/LocketModels';
-import { SessionManager } from '../services/SessionManager';
-
-interface WidgetFormData {
-  thumbnailUrl: string;
-  caption: string;
-  senderName: string;
-  hasData: boolean;
-}
+import { LocketApiClient } from '../services/LocketApiClient';
+import { SessionManager, WidgetFormBindingPayload } from '../services/SessionManager';
 
 const LOG_DOMAIN = 0x0000;
 const LOG_TAG = 'LocketFormAbility';
 
 export default class LocketFormAbility extends FormExtensionAbility {
-  private buildFormData(moment: WidgetMomentData | null): WidgetFormData {
+  private buildInitialPayload(moment: WidgetMomentData | null): WidgetFormBindingPayload {
     if (moment !== null && moment.thumbnailUrl.length > 0) {
       return {
-        thumbnailUrl: moment.thumbnailUrl,
+        imgName: '',
+        hasImage: false,
         caption: moment.caption,
         senderName: moment.senderName,
-        hasData: true
+        hasData: true,
+        unseenCount: Math.max(0, moment.unseenCount ?? 0)
       };
     }
     return {
-      thumbnailUrl: '',
+      imgName: '',
+      hasImage: false,
       caption: '',
       senderName: '',
-      hasData: false
+      hasData: false,
+      unseenCount: 0
     };
   }
 
@@ -42,18 +40,50 @@ export default class LocketFormAbility extends FormExtensionAbility {
       const msg = err instanceof Error ? err.message : String(err);
       hilog.warn(LOG_DOMAIN, LOG_TAG, 'Failed to register formId %{public}s: %{public}s', formId, msg);
     }
-    await this.refreshFormFromStorage(formId);
+    await this.refreshFormFromLiveOrStorage(formId);
   }
 
-  private async refreshFormFromStorage(formId: string): Promise<void> {
+  private async refreshFormFromLiveOrStorage(formId: string): Promise<void> {
     if (formId.length === 0) {
       return;
     }
     try {
-      const moment = await SessionManager.getInstance().refreshLatestWidgetMoment(this.context);
-      const data = this.buildFormData(moment);
-      const binding = formBindingData.createFormBindingData(data);
-      await formProvider.updateForm(formId, binding);
+      const sessionMgr = SessionManager.getInstance();
+      await sessionMgr.refreshLatestWidgetMoment(this.context);
+      let moment: WidgetMomentData | null = sessionMgr.getLatestWidgetMoment();
+      let unseenCount: number = moment?.unseenCount ?? 0;
+
+      if (sessionMgr.isLoggedIn()) {
+        try {
+          const api = LocketApiClient.getInstance();
+          await api.ensureValidToken();
+          const feed = await api.getLatestMoments();
+          try {
+            unseenCount = await api.fetchMissedMomentsCount();
+          } catch (countErr) {
+            const countMsg = countErr instanceof Error ? countErr.message : String(countErr);
+            hilog.warn(LOG_DOMAIN, LOG_TAG, 'Widget unseen count fetch skipped: %{public}s', countMsg);
+          }
+
+          if (feed.moments.length > 0) {
+            const latest = feed.moments[0];
+            moment = {
+              canonicalUid: latest.canonicalUid,
+              thumbnailUrl: latest.thumbnailUrl,
+              caption: latest.caption,
+              senderName: latest.senderName,
+              createdAtSeconds: latest.createdAtSeconds,
+              unseenCount: unseenCount
+            };
+            await sessionMgr.saveLatestWidgetMoment(moment);
+          }
+        } catch (liveErr) {
+          const liveMsg = liveErr instanceof Error ? liveErr.message : String(liveErr);
+          hilog.warn(LOG_DOMAIN, LOG_TAG, 'Widget live refresh failed, falling back to cache: %{public}s', liveMsg);
+        }
+      }
+
+      await sessionMgr.pushWidgetUpdateToForms([formId], moment, this.context, unseenCount);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to update widget form %{public}s: %{public}s', formId, msg);
@@ -62,7 +92,7 @@ export default class LocketFormAbility extends FormExtensionAbility {
 
   onAddForm(want: Want): formBindingData.FormBindingData {
     const cached = SessionManager.getInstance().getLatestWidgetMoment();
-    const initialData = this.buildFormData(cached);
+    const initialData = this.buildInitialPayload(cached);
 
     const formIdParam = want.parameters?.[formInfo.FormParam.IDENTITY_KEY];
     if (typeof formIdParam === 'string' && formIdParam.length > 0) {
